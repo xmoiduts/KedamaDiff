@@ -1,12 +1,15 @@
 import requests,os
 import time,datetime
+import concurrent.futures
 
 # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/2/3/2/3/1/1.jpg?c=1510454854  
 map_domain='https://map.nyaacat.com/kedama'
 map_name='v2_daytime'
 refcode='c=1510454854'
 download_path=r'images/'
-threads=10
+max_threads=32
+crawl_zones=['/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1']
+crawl_level=8
 
 '''输入图块链接，返回              错误处理应该改进吧     '''
 def teaseImage(imageURL):
@@ -41,19 +44,28 @@ def createTodayDir(path):
     new_path=path+'/'+today+'/'
     if not os.path.exists(new_path):
         os.makedirs(new_path)
-    return new_path
+    return new_path #形如 20081223
 
-
-download_path = createTodayDir(download_path)
-for i in makePicName(['/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1'],8):
-    picurl=map_domain+'/'+map_name+i[0]+'?'+refcode
+'''抓图线程'''
+def dealWithPicurl(pic_tuple,save_dir,download=False):
+    url=map_domain+'/'+map_name+pic_tuple[0]+'?'+refcode
+    filename=pic_tuple[1]
     try:
-        rh=teaseImage(picurl)
-        downloadImage(picurl,download_path,i[1])
-        print(i[1],'\t',rh['Last-Modified'],'\t',rh['Content-Length'])
-    except KeyboardInterrupt:
-        break#以后改成退出程序
+        rh=teaseImage(url)
+        if download==True:
+            downloadImage(url,save_dir,filename)
+        return(filename+'\t'+rh['Last-Modified']+'\t'+rh['Content-Length'])
     except KeyError:
-        print(i[1],'\t','ERROR')
-    except:
-        pass
+        return(filename+'\t'+'ERROR')
+
+'''永远返回/download_path/年月日'''
+'''我也不想写这个的，但是直接传download_path值,后面的executor.map()就只能执行17次'''
+def getImgdir():
+    download_dir=createTodayDir(download_path)
+    while(True):
+        yield download_dir
+
+to_crawl=makePicName(crawl_zones,crawl_level)
+with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+    for pic_info in executor.map(dealWithPicurl,to_crawl,getImgdir()):   #没写是否下载的逻辑呢
+        print(pic_info)
