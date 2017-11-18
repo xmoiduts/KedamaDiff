@@ -6,14 +6,15 @@ import concurrent.futures
 map_domain='https://map.nyaacat.com/kedama'
 map_name='v2_daytime'
 refcode='c=1510454854'
-download_path=r'images/'
+download_path=r'images/'+map_name
 max_threads=32
-crawl_zones=['/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1']
+crawl_zones=['/1/2/2/2/3/2']
+#'/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1'
 crawl_level=8
 
 '''输入图块链接，返回              错误处理应该改进吧     '''
 def teaseImage(imageURL):
-    r=requests.head(imageURL) #只取响应头而不下载响应体
+    r=requests.head(imageURL,timeout=5) #只取响应头而不下载响应体
     return r.headers
     #print(r.headers['Last-Modified'],r.headers['Content-Length']) #404-"KeyError"error.
 
@@ -38,14 +39,6 @@ def makePicName(prefixes,depth):
             yield(['/'+'/'.join(prefix+quaternary)+'.jpg','_'+'_'.join(prefix+quaternary)+'.jpg'])
     return
 
-'''新建今日存图目录并以此替换download_path'''
-def createTodayDir(path):
-    today=datetime.datetime.today().strftime('%Y%m%d')
-    new_path=path+'/'+today+'/'
-    if not os.path.exists(new_path):
-        os.makedirs(new_path)
-    return new_path #形如 20081223
-
 '''抓图线程'''
 def dealWithPicurl(pic_tuple,save_dir,download=False):
     url=map_domain+'/'+map_name+pic_tuple[0]+'?'+refcode
@@ -54,18 +47,53 @@ def dealWithPicurl(pic_tuple,save_dir,download=False):
         rh=teaseImage(url)
         if download==True:
             downloadImage(url,save_dir,filename)
-        return(filename+'\t'+rh['Last-Modified']+'\t'+rh['Content-Length'])
+        return({'Filename':filename,'Lastmod':rh['Last-Modified'],'Length':rh['Content-Length']})
     except KeyError:
-        return(filename+'\t'+'ERROR')
+        return({'Filename':filename,'ERROR':'404'})
+    except requests.exceptions.ConnectionError:
+        return({'Filename':filename,'ERROR':'Fail'})
+    except requests.exceptions.ReadTimeout:
+        return({'Filename':filename,'ERROR':'Fail'})
 
 '''永远返回/download_path/年月日'''
 '''我也不想写这个的，但是直接传download_path值,后面的executor.map()就只能执行17次'''
-def getImgdir():
-    download_dir=createTodayDir(download_path)
+def getImgdir(path,download):
+    today=datetime.datetime.today().strftime('%Y%m%d')
+    new_path=path+'/'+today+'/'
+    if download==True:
+        if not os.path.exists(new_path):
+            os.makedirs(new_path)
     while(True):
-        yield download_dir
+        yield new_path
 
-to_crawl=makePicName(crawl_zones,crawl_level)
-with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-    for pic_info in executor.map(dealWithPicurl,to_crawl,getImgdir()):   #没写是否下载的逻辑呢
-        print(pic_info)
+'''返回是否下载'''
+def whetherDownload(download):
+    while True:
+        yield download
+
+'''每天运行，探测选定区域内的图块信息但不下载图片，收录抓取日志，收录`活跃度`大型dict'''
+def runsDaily():
+    download=False
+    log_buffer={}
+    to_crawl=makePicName(crawl_zones,crawl_level)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+        for pic_info in executor.map(dealWithPicurl,to_crawl,getImgdir(download_path,download),whetherDownload(download)): 
+            if 'ERROR' in pic_info.keys():                                              #抓取图片头失败,pass
+                print(pic_info['Filename'],pic_info['ERROR'])
+            else:
+                try:
+                    latest_length=pic_info['Length']
+                    stored_length=log_buffer[pic_info['Filename']] [-1] ['Length']
+                    if latest_length==stored_length:                                    #dict中的图片并未过时,ignore
+                        print('ignoring\t\t'+pic_info['Filename'])
+                    else:                                                               #为dict中的图片更新时间,append
+                        log_buffer[pic_info['Filename']].append([{'Lastmod':pic_info['Lastmod'],'Length':pic_info['Length']}])
+                        print('Updated\t\t\t'+pic_info['Filename'])
+                except KeyError:                                                        #添加新图片信息,assign
+                    log_buffer[pic_info['Filename']]=([{'Lastmod':pic_info['Lastmod'],'Length':pic_info['Length']}])
+                    print('adding new img\t\t'+pic_info['Filename'])
+    print(log_buffer)
+
+'''每周运行，和上周的图片信息比较并下载长度变化了的图块，保存图片到当天的文件夹里，收录`图片历史`大型dict。
+'''
+runsDaily()
