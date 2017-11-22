@@ -1,14 +1,16 @@
 import requests,os
 import time,datetime
 import concurrent.futures
+import ast
 
 # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/2/3/2/3/1/1.jpg?c=1510454854  
 map_domain='https://map.nyaacat.com/kedama'
 map_name='v2_daytime'
 refcode='c=1510454854'
-download_path=r'images/'+map_name
+image_folder=r'images/'+map_name
+data_folder =r'data/'+map_name
 max_threads=32
-crawl_zones=['/1/2/2/2/3/2']
+crawl_zones=['/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1']
 #'/1/2/2/2','/0/3/3/3','/0/3/3/2','/1/2/2/3','/2/1/1/0','/2/1/1/1','/3/0/0/0','/3/0/0/1'
 crawl_level=8
 
@@ -55,8 +57,8 @@ def dealWithPicurl(pic_tuple,save_dir,download=False):
     except requests.exceptions.ReadTimeout:
         return({'Filename':filename,'ERROR':'Fail'})
 
-'''永远返回/download_path/年月日'''
-'''我也不想写这个的，但是直接传download_path值,后面的executor.map()就只能执行17次'''
+'''永远返回/image_folder/年月日'''
+'''我也不想写这个的，但是直接传image_folder值,后面的executor.map()就只能执行17次'''
 def getImgdir(path,download):
     today=datetime.datetime.today().strftime('%Y%m%d')
     new_path=path+'/'+today+'/'
@@ -73,26 +75,51 @@ def whetherDownload(download):
 
 '''每天运行，探测选定区域内的图块信息但不下载图片，收录抓取日志，收录`活跃度`大型dict'''
 def runsDaily():
-    download=False
+    figure_404=figure_Fail=Figure_ignore=Figure_added=Figure_update=0
+    download=False      #日更不下载图片，只收录图片头长度发生了变化的图块信息
     log_buffer={}
-    to_crawl=makePicName(crawl_zones,crawl_level)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
-        for pic_info in executor.map(dealWithPicurl,to_crawl,getImgdir(download_path,download),whetherDownload(download)): 
+
+    try:        #读取图块更新史，若文件不存在则空文件将被创建
+        with open(data_folder+'/'+'update_history.txt','r') as f:
+            log_buffer=ast.literal_eval(f.read())#txt to str to dict
+    except FileNotFoundError:
+        if not os.path.exists(data_folder):
+            os.makedirs(data_folder)
+        with open(data_folder+'/'+'update_history.txt','w') as f:
+            f.write('{}')#先写个空dict防呆
+
+    to_crawl=makePicName(crawl_zones,crawl_level)   #一个生成器
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:    #抓图工人线程池
+        for pic_info in executor.map(dealWithPicurl,to_crawl,getImgdir(image_folder,download),whetherDownload(download)): 
             if 'ERROR' in pic_info.keys():                                              #抓取图片头失败,pass
-                print(pic_info['Filename'],pic_info['ERROR'])
+                print(pic_info['ERROR']+'\t\t\t'+pic_info['Filename'])
+                if (pic_info['ERROR']== '404'):
+                    figure_404  += 1
+                else :
+                    figure_Fail += 1
             else:
                 try:
                     latest_length=pic_info['Length']
                     stored_length=log_buffer[pic_info['Filename']] [-1] ['Length']
-                    if latest_length==stored_length:                                    #dict中的图片并未过时,ignore
+                    if latest_length==stored_length:                                    #dict中的图片并未过时（判断标准：大小不变）,ignore
                         print('ignoring\t\t'+pic_info['Filename'])
-                    else:                                                               #为dict中的图片更新时间,append
-                        log_buffer[pic_info['Filename']].append([{'Lastmod':pic_info['Lastmod'],'Length':pic_info['Length']}])
+                        Figure_ignore += 1
+                    else:                                                               #为dict中的图片追加新的时间信息,update
+                        log_buffer[pic_info['Filename']].append({'Lastmod':pic_info['Lastmod'],'Length':pic_info['Length']})
                         print('Updated\t\t\t'+pic_info['Filename'])
-                except KeyError:                                                        #添加新图片信息,assign
+                        Figure_update += 1
+                except KeyError:                                                        #添加新图片信息,add
                     log_buffer[pic_info['Filename']]=([{'Lastmod':pic_info['Lastmod'],'Length':pic_info['Length']}])
                     print('adding new img\t\t'+pic_info['Filename'])
-    print(log_buffer)
+                    Figure_added += 1
+
+    print('\n404:\t\t',figure_404,'\nFailed:\t\t',figure_Fail,'\nUnchanged:\t',Figure_ignore,\
+    '\nAdded:\t\t',Figure_added,'\nUpdated:\t',Figure_update)
+    
+    with open(data_folder+'/'+'update_history.txt','w') as f:#写回图块更新史文件
+        f.seek(0)
+        f.write(str(log_buffer))
+        f.truncate()
 
 '''每周运行，和上周的图片信息比较并下载长度变化了的图块，保存图片到当天的文件夹里，收录`图片历史`大型dict。
 '''
