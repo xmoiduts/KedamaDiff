@@ -124,7 +124,7 @@ def runsDaily():
     print('\n404:\t\t',figure_404,'\nFailed:\t\t',figure_Fail,'\nUnchanged:\t',Figure_ignore,\
     '\nAdded:\t\t',Figure_added,'\nUpdated:\t',Figure_update)
 
-    with open(data_folder+'/'+'update_history.txt','w') as f:#写回图块更新史文件
+    with open(data_folder+'/'+'update_history.txt','w') as f:#写回 图块更新史文件
         f.seek(0)
         f.write(str(log_buffer))
         f.truncate()
