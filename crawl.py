@@ -85,9 +85,9 @@ def runsDaily():
 
 
     try:        #读取图块更新史，若文件不存在则其所在路径将被创建
-        with open(data_folder+'/'+'update_history.txt','r') as f:
-            #log_buffer=json.load(f)
-            log_buffer=ast.literal_eval(f.read())#txt to str to dict
+        with open(data_folder+'/'+'update_history.json','r') as f:
+            log_buffer=json.load(f)
+            #log_buffer=ast.literal_eval(f.read())#txt to str to dict
     except FileNotFoundError:
         if not os.path.exists(data_folder):
             os.makedirs(data_folder)
@@ -112,7 +112,7 @@ def runsDaily():
                         print('ignoring\t\t'+pic_info['Filename'])
                         Figure_ignore += 1
                     else:                                                               #为dict中的图片追加新的时间信息,update
-                        log_buffer[pic_info['Filename']].append({'Save_in':next(save_to),'ETag':pic_info['ETag']})'''如果同一天跑了两次怎么办'''
+                        log_buffer[pic_info['Filename']].append({'Save_in':next(save_to),'ETag':pic_info['ETag']})#如果同一天跑了两次怎么办
                         print('Updated\t\t\t'+pic_info['Filename'])
                         download_queue.append(pic_info['Path'])
                         Figure_update += 1
