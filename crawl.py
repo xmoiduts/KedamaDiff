@@ -1,7 +1,7 @@
 import requests,os
 import time,datetime
 import concurrent.futures
-import ast
+import ast,json
 
 # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/2/3/2/3/1/1.jpg?c=1510454854  
 map_domain='https://map.nyaacat.com/kedama'
@@ -84,14 +84,15 @@ def runsDaily():
     download_queue=[]
 
 
-    try:        #读取图块更新史，若文件不存在则空文件将被创建
+    try:        #读取图块更新史，若文件不存在则其所在路径将被创建
         with open(data_folder+'/'+'update_history.txt','r') as f:
+            #log_buffer=json.load(f)
             log_buffer=ast.literal_eval(f.read())#txt to str to dict
     except FileNotFoundError:
         if not os.path.exists(data_folder):
             os.makedirs(data_folder)
-        with open(data_folder+'/'+'update_history.txt','w') as f:
-            f.write('{}')#先写个空dict防呆
+        #with open(data_folder+'/'+'update_history.txt','w') as f:
+        #    f.write('{}')#先写个空dict防呆
 
     to_crawl=makePicName(crawl_zones,crawl_level)   #一个生成器
     save_to=getImgdir(image_folder,download)
@@ -111,7 +112,7 @@ def runsDaily():
                         print('ignoring\t\t'+pic_info['Filename'])
                         Figure_ignore += 1
                     else:                                                               #为dict中的图片追加新的时间信息,update
-                        log_buffer[pic_info['Filename']].append({'Save_in':next(save_to),'ETag':pic_info['ETag']})
+                        log_buffer[pic_info['Filename']].append({'Save_in':next(save_to),'ETag':pic_info['ETag']})'''如果同一天跑了两次怎么办'''
                         print('Updated\t\t\t'+pic_info['Filename'])
                         download_queue.append(pic_info['Path'])
                         Figure_update += 1
@@ -124,10 +125,8 @@ def runsDaily():
     print('\n404:\t\t',figure_404,'\nFailed:\t\t',figure_Fail,'\nUnchanged:\t',Figure_ignore,\
     '\nAdded:\t\t',Figure_added,'\nUpdated:\t',Figure_update)
 
-    with open(data_folder+'/'+'update_history.txt','w') as f:#写回 图块更新史文件
-        f.seek(0)
-        f.write(str(log_buffer))
-        f.truncate()
+    with open(data_folder+'/'+'update_history.json','w') as f:#写回 图块更新史文件
+        json.dump(log_buffer,f,indent=2)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:    #增量？下载图片
         for pic_info2 in executor.map(dealWithPicurl,download_queue,getImgdir(image_folder,True),whetherDownload(True)): 
