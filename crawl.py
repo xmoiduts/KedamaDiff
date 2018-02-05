@@ -4,6 +4,7 @@ import concurrent.futures
 import ast,json
 import hashlib
 import logging
+import itertools
 
 class crawler(): #以后传配置文件
     def __init__ (self):
@@ -15,8 +16,8 @@ class crawler(): #以后传配置文件
         '''抓取设置'''
         self.max_threads=16                                 #线程数
 
-        #self.total_depth=0
-        #self.target_depth= -3                               #目标图块的缩放级别
+        #self.total_depth=15
+        #self.target_depth= -3                              #目标图块的缩放级别
         self.crawl_zones=['/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1']
         # '/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1'
         self.crawl_level=12
@@ -46,6 +47,23 @@ class crawler(): #以后传配置文件
                 quaternary= [str(int(i,2)) for i in split_ed]                   #0 0 0 2 0 2
                 yield(['/'+'/'.join(prefix+quaternary)+'.jpg','_'+'_'.join(prefix+quaternary)+'.jpg'])
         return
+
+    '''给定[（中心点（X,Y坐标），目标缩放深度下横向图块数量，纵向图块数量），……]，目标缩放深度，
+    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出（img path，"Y_X_目标缩放深度.jpg"）
+    * 坐标系中X向右变大，Y向上变大'''
+    def makePicXY(self,zoneLists,target_depth): #func ([ ( (12,4),4,8 ) , …… ] , -2 )
+        for center,width,height in zoneLists: #对给定的**一个**区域生成坐标
+            X_list= [X for X in range(center[0]-width*2**-target_depth ,center[0]+width*2**-target_depth ) if (X / (2**-target_depth)) %2 == 1]
+            Y_list= [Y for Y in range(center[1]+height*2**-target_depth,center[1]-height*2**-target_depth,-1) if (Y / (2**-target_depth)) %2 == 1]
+            #print(X_list,Y_list)
+            for XY in itertools.product(X_list,Y_list): #求两个列表的笛卡尔积
+                yield self.xy2Path(XY)
+
+    def xy2Path(self,XY):
+        print("Inbound:",XY)
+    
+    def path2xy(self,path):
+        print("Inbound:",path)
 
     '''抓图线程'''
     def dealWithPicurl(self,pic_tuple,save_to,download=False):
@@ -162,4 +180,7 @@ class crawler(): #以后传配置文件
 '''每周运行，和上周的图片信息比较并下载Etag的图块，保存SHA1变动了的图片到当天的文件夹里，收录`图片历史`大型json。
 '''
 cr=crawler()
-cr.runsDaily()
+#cr.runsDaily()
+for i in cr.makePicXY([ ( (12,4),4,8 ) , ((-12,-4),4,8 ) ] , 0):
+    pass
+
