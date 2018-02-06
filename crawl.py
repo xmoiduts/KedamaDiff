@@ -6,6 +6,13 @@ import hashlib
 import logging
 import itertools
 
+class wannengError(Exception):
+    def __init__(self, value):
+        self.value = value
+    def __str__(self):
+        return repr(self.value)
+
+
 class crawler(): #以后传配置文件
     def __init__ (self):
         '''文件/路径设置'''
@@ -16,8 +23,8 @@ class crawler(): #以后传配置文件
         '''抓取设置'''
         self.max_threads=16                                 #线程数
 
-        #self.total_depth=15
-        #self.target_depth= -3                              #目标图块的缩放级别
+        self.total_depth= self.fetchTotalDepth()            #缩放级别总数
+        self.target_depth= -3                               #目标图块的缩放级别
         self.crawl_zones=['/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1']
         # '/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1'
         self.crawl_level=12
@@ -49,7 +56,7 @@ class crawler(): #以后传配置文件
         return
 
     '''给定[（中心点（X,Y坐标），目标缩放深度下横向图块数量，纵向图块数量），……]，目标缩放深度，
-    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出（img path，"Y_X_目标缩放深度.jpg"）
+    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出（img path.jpg，"Y_X_目标缩放深度.jpg"）
     * 坐标系中X向右变大，Y向上变大'''
     def makePicXY(self,zoneLists,target_depth): #func ([ ( (12,4),4,8 ) , …… ] , -2 )
         for center,width,height in zoneLists: #对给定的**一个**区域生成坐标
@@ -59,11 +66,43 @@ class crawler(): #以后传配置文件
             for XY in itertools.product(X_list,Y_list): #求两个列表的笛卡尔积
                 yield self.xy2Path(XY)
 
+    '''由站内路径转坐标，传入的坐标已被筛选，保证是(total_depth+target_depth)图片的中心点'''
     def xy2Path(self,XY):
+        #需要total_depth和坐标来生成完整path
         print("Inbound:",XY)
     
     def path2xy(self,path):
         print("Inbound:",path)
+
+    '''逐层爬取图块，探测当下地图一共多少层,硬编码取地图中心点右上的图块/1 /1/2 /1/2/2 ……
+    若受网络等影响未获取到值，则整个脚本退出。'''
+    def fetchTotalDepth(self):
+        print("Working out to figure out the zoom levels in map",self.map_name,end='',flush=True)
+        depth=0
+        path='/1'
+        errors=0
+        while True:# do-while 循环结构的一种改写
+            url=self.map_domain+'/'+self.map_name+path+'.jpg?'+str(int(time.time()))
+            try:
+                print('.',end='',flush=True) #只输出，不换行
+                r= requests.head(url,timeout=5)
+                if r.status_code==404:
+                    break
+                elif r.status_code==200:
+                    depth += 1
+                    path=path+'/2'
+                else:
+                    raise wannengError(r.status_code)
+            except Exception as e:
+                print(e.value)
+                errors += 1
+                if errors >= 3:
+                    raise e
+        print("\nTotal zoom depth:",depth)
+        return depth
+
+        
+        
 
     '''抓图线程'''
     def dealWithPicurl(self,pic_tuple,save_to,download=False):
@@ -181,6 +220,8 @@ class crawler(): #以后传配置文件
 '''
 cr=crawler()
 #cr.runsDaily()
+'''
 for i in cr.makePicXY([ ( (12,4),4,8 ) , ((-12,-4),4,8 ) ] , 0):
     pass
+'''
 
