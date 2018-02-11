@@ -14,7 +14,7 @@ class wannengError(Exception):
 
 
 class crawler(): #以后传配置文件
-    def __init__ (self):
+    def __init__ (self,test=False):
         '''文件/路径设置'''
         self.map_domain='https://map.nyaacat.com/kedama'    #Overviewer地图地址
         self.map_name='v2_daytime'                          #地图名称
@@ -23,8 +23,11 @@ class crawler(): #以后传配置文件
         '''抓取设置'''
         self.max_threads=16                                 #线程数
 
-        self.total_depth= self.fetchTotalDepth()            #缩放级别总数
-        self.target_depth= -3                               #目标图块的缩放级别
+        if test == True:
+            self.total_depth = 15
+        else:
+            self.total_depth= self.fetchTotalDepth()        #缩放级别总数
+        self.target_depth= -3                               #目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         self.crawl_zones=['/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1']
         # '/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1'
         self.crawl_level=12
@@ -64,24 +67,40 @@ class crawler(): #以后传配置文件
             Y_list= [Y for Y in range(center[1]+height*2**-target_depth,center[1]-height*2**-target_depth,-1) if (Y / (2**-target_depth)) %2 == 1]
             #print(X_list,Y_list)
             for XY in itertools.product(X_list,Y_list): #求两个列表的笛卡尔积
-                yield self.xy2Path(XY)
+                yield self.xy2Path(XY,self.total_depth)
 
-    '''由站内路径转坐标，传入的坐标已被筛选，保证是(total_depth+target_depth)图片的中心点'''
-    def xy2Path(self,XY):
-        #需要total_depth和坐标来生成完整path
-        print("Inbound:",XY)
-    
+    '''由坐标生成图片路径'''
+    def xy2Path(self,XY,depth):
+        #需要坐标和地图总层数来生成完整path
+        #print("Inbound:",XY)
+        X = XY[0]  ; Y=XY[1]        #目标坐标值
+        table=['/2','/0','/3','/1']
+        val_X = 0  ; val_Y = 0      #本次迭代后的坐标值
+        p = depth                   #当前处理的缩放等级
+        path = ''                   #返回值的初值
+        while (val_X != X) and (val_Y != Y):    #未迭代到目标坐标点：依次计算横纵坐标下一层是哪块
+            p -= 1
+            tmp_X = 0 if val_X > X else 1
+            val_X += (2 * tmp_X - 1) * (2 ** p)
+            tmp_Y = 0 if val_Y > Y else 1
+            val_Y += (2 * tmp_Y - 1) * (2 ** p)
+            tmp = tmp_X *2 + tmp_Y
+            path += table[tmp]      
+        print(path)
+        return path
+    '''由站内路径转坐标，传入的坐标已被筛选，保证是第(total_depth+target_depth)级图片的中心点'''
     def path2xy(self,path):
         print("Inbound:",path)
 
     '''逐层爬取图块，探测当下地图一共多少层,硬编码取地图中心点右上的图块/1 /1/2 /1/2/2 ……
     若受网络等影响未获取到值，则整个脚本退出。'''
     def fetchTotalDepth(self):
-        print("Working out to figure out the zoom levels in map",self.map_name,end='',flush=True)
+        print("Working on", self.map_name ,"to figure out its zoom levels",end='',flush=True)
         depth=0
         path='/1'
         errors=0
         while True:# do-while 循环结构的一种改写
+            
             url=self.map_domain+'/'+self.map_name+path+'.jpg?'+str(int(time.time()))
             try:
                 print('.',end='',flush=True) #只输出，不换行
@@ -91,6 +110,7 @@ class crawler(): #以后传配置文件
                 elif r.status_code==200:
                     depth += 1
                     path=path+'/2'
+                    errors=0
                 else:
                     raise wannengError(r.status_code)
             except Exception as e:
@@ -218,7 +238,7 @@ class crawler(): #以后传配置文件
 
 '''每周运行，和上周的图片信息比较并下载Etag的图块，保存SHA1变动了的图片到当天的文件夹里，收录`图片历史`大型json。
 '''
-cr=crawler()
+
 #cr.runsDaily()
 '''
 for i in cr.makePicXY([ ( (12,4),4,8 ) , ((-12,-4),4,8 ) ] , 0):
