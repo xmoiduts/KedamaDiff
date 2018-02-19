@@ -15,8 +15,8 @@ if test_number == 101:
     cr.fetchTotalDepth()
 
 elif test_number == 102:
-    cr=cr=crawl.crawler(test=True)
-    cr.xy2Path((-100,96),15)
+    cr=crawl.crawler(test=True)
+    cr.xy2Path((-24,8),15)
     
 elif test_number == 103:
     cr=crawl.crawler()
@@ -24,5 +24,15 @@ elif test_number == 103:
     for i in toCrawl:
         print(i)
 
+elif test_number == 104:
+    cr=crawl.crawler(test=True)
+    cr.path2xy('/3/0/0/0/0/0/0/0/0/0/1/0',15)
+    cr.xy2Path((40.0,-8.0),15)
 
-
+elif test_number == 105:
+    cr=crawl.crawler(test=False)
+    gen1=cr.makePicXY([((0,0),4,2)],cr.target_depth)
+    for XY in gen1:
+        print(XY)
+    #/0        /3/3/2/3/2/3/1
+    #/0/3/3/3/3/3/3/2/3/2/3/1
