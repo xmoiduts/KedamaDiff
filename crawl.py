@@ -85,20 +85,21 @@ class crawler(): #以后传配置文件
             tmp_Y = 0 if val_Y > Y else 1
             val_Y += (2 * tmp_Y - 1) * (2 ** p)
             tmp = tmp_X *2 + tmp_Y
-            path += table[tmp]      
+            path += table[tmp]    
+        #print(path)  
         return path
 
     '''由图块路径转坐标，传入的坐标已被筛选，保证是第(total_depth+target_depth)级图片的中心点'''
-    def path2xy(self,path,depth):   #不要丢掉开头的'/'哟
-        print("Inbound:",path)
+    def path2xy(self,path,depth):   #'/0/3/3/3/1/2/1/3' 不要丢掉开头的'/'哟;本地图的总层数;
+        #print("Inbound:",path)
         in_list = map(int,path.split('/')[1:])
         X,Y=(0,0)
         table=[1,3,0,2]
         for index,value in enumerate(in_list):
             X += (table[value]//2-0.5)*2**(depth-index) #需要整数除
             Y += (table[value]% 2-0.5)*2**(depth-index)
-        print(X,Y)
-        return(X,Y)
+        #print(int(X),int(Y))
+        return(int(X),int(Y))
 
 
     '''逐层爬取图块，探测当下地图一共多少层,硬编码取地图中心点右上的图块/1 /1/2 /1/2/2 ……
@@ -130,8 +131,23 @@ class crawler(): #以后传配置文件
         print("\nTotal zoom depth:",depth)
         return depth
 
-        
-        
+    '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’'''
+    def changeImgName(self):
+        #先改图片名，再改历史记录
+        prevwd = os.getcwd()
+        os.chdir(self.image_folder)
+        for dir in os.listdir():
+            os.chdir(dir)
+            time.sleep(3)
+            for filename in os.listdir():
+                path = filename.split('.')[0].replace('_','/')
+                XY = self.path2xy(path,11)
+                new_file_name = str(self.target_depth)+'_'+str(XY[0])+'_'+str(XY[1])+'.jpg'
+                os.rename(filename,new_file_name)
+                print(filename,'-->',new_file_name)
+            os.chdir('..')
+        os.chdir(prevwd)
+        print('changing back to',os.getcwd())
 
     '''抓图线程'''
     def dealWithPicurl(self,pic_tuple,save_to,download=False):
@@ -153,14 +169,14 @@ class crawler(): #以后传配置文件
 
     '''永远返回/image_folder/年月日'''
     '''我也不想写这个的，但是直接传image_folder值,后面的executor.map()就只能执行17次'''
-    def getImgdir(self,path,download):
+    def getImgdir(self,dir,download):
         today=datetime.datetime.today().strftime('%Y%m%d')
-        new_path=path+'/'+today+'/'
+        new_dir=dir+'/'+today+'/'
         if download==True:
-            if not os.path.exists(new_path):
-                os.makedirs(new_path)
+            if not os.path.exists(new_dir):
+                os.makedirs(new_dir)
         while(True):
-            yield new_path
+            yield new_dir
 
     '''返回是否下载'''
     def whetherDownload(self,download):

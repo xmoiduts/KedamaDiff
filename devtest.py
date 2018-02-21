@@ -25,9 +25,8 @@ elif test_number == 103:
         print(i)
 
 elif test_number == 104:
-    cr=crawl.crawler(test=True)
-    cr.path2xy('/3/0/0/0/0/0/0/0/0/0/1/0',15)
-    cr.xy2Path((40.0,-8.0),15)
+    cr=crawl.crawler(test=True)    
+    cr.xy2Path((cr.path2xy('/0/0',2)),3)
 
 elif test_number == 105:
     cr=crawl.crawler(test=False)
@@ -36,3 +35,11 @@ elif test_number == 105:
         print(XY)
     #/0        /3/3/2/3/2/3/1
     #/0/3/3/3/3/3/3/2/3/2/3/1
+
+elif test_number == 106:
+    cr=crawl.crawler(test=True)
+    cr.path2xy('/0/3/3/3/1/2/1/3',11)
+
+elif test_number == 107:
+    cr=crawl.crawler()
+    cr.changeImgName()
