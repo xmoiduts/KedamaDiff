@@ -28,23 +28,32 @@ class crawler(): #以后传配置文件
         else:
             self.total_depth= self.fetchTotalDepth()        #缩放级别总数
         self.target_depth= -3                               #目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.crawl_zones=['/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1']
-        # '/1/2/2/2/2/2/2/2','/0/3/3/3/3/3/3/3','/0/3/3/3/3/3/3/2','/1/2/2/2/2/2/2/3','/2/1/1/1/1/1/1/0','/2/1/1/1/1/1/1/1','/3/0/0/0/0/0/0/0','/3/0/0/0/0/0/0/1'
-        self.crawl_level=12
-        # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/2/3/2/3/1.jpg?c=1510454854  
+        self.crawl_zones=[(0,0),64,32]
+        self.timestamp = str(int(time.time()))
+        # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854  
 
-    '''输入图块链接，返回              错误处理应该改进吧     '''
+    '''输入图块链接，返回              错误处理应该改进吧     
     def teaseImage(self,URL):
         r=requests.head(URL,timeout=5) #只取响应头而不下载响应体
         return r.headers
         #print(r.headers['Last-Modified'],r.headers['Content-Length']) #404-"KeyError"error.
+    '''
 
-    '''下载给定URL的文件并返回。'''
-    def downloadImage(self,URL):
+    '''下载给定URL的文件并返回。
+    def getImage(self,URL):
         r=requests.get(URL,stream='True')
         if r.status_code==200:
             img=r.raw.read()
             return img
+    '''
+    def downloadImage(self,URL,dir_filename):
+        r = requests.get(URL,stream = 'True')
+        if i.status_code = 200:
+            img = r.raw.read()
+            with open(dir_filename,'wb') as f:
+                        f.write(img)
+                        f.close()
+
 
     '''输入[多个可采集区域的前缀]和采集深度，生成['pic_name','文件名']。'''
     def makePicName(self,prefixes,depth):
@@ -59,7 +68,7 @@ class crawler(): #以后传配置文件
         return
 
     '''给定[（抓取区域中心点（X,Y坐标），目标缩放深度下横向抓取图块数量，纵向抓取图块数量），……]，目标缩放深度，
-    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出（img path.jpg，"Y_X_目标缩放深度.jpg"）
+    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出"目标缩放深度_X_Y.jpg"
     * 坐标系中X向右变大，Y向上变大'''
     def makePicXY(self,zoneLists,target_depth): #func ([ ( (12,4),4,8 ) , …… ] , -2 )
         for center,width,height in zoneLists:   #开始对给定的区域**之一**生成坐标
@@ -182,23 +191,64 @@ class crawler(): #以后传配置文件
 
     '''永远返回/image_folder/年月日'''
     '''我也不想写这个的，但是直接传image_folder值,后面的executor.map()就只能执行17次'''
-    def getImgdir(self,dir,download):
+    def getImgdir(self,dir):
         today=datetime.datetime.today().strftime('%Y%m%d')
         new_dir=dir+'/'+today+'/'
-        if download==True:
+        while(True):
             if not os.path.exists(new_dir):
                 os.makedirs(new_dir)
-        while(True):
             yield new_dir
 
-    '''返回是否下载'''
+    '''返回是否下载
     def whetherDownload(self,download):
         while True:
             yield download
+    '''
+
+    def visitPath(self,path,dir):#抓取单张图片并对响应进行处理,图片存储在dir
+        URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
+        r=requests.head(URL,timeout=5)  #Head操作
+        if r.status_code == 404 :       #【404，pass】
+            print('404\t\t'+path)
+        elif r.status_code == 200 :
+            file_name = self.path2xy(path) + '.jpg'
+            if file_name not in update_history :    #【库里无该图，Add】
+                downloadImage(URL,dir + self.path2xy(path,self.total_depth) + '.jpg' )
+            
+
+
+    '''每日运行的抓图存图函数，第一次运行创建路径和数据文件，全量下/存图片，后续只下载ETag变动的图片并保存SHA1变动的图片，一轮完成而不是先head再get'''
+    def runsDaily2(self):
+        statistics_count = {'404':0,'Fail':0,'Ignore':0,'Added':0,'Update':0,'Replace':0}   #统计抓图状态
+        update_history = [] #更新历史
+        
+
+        try:    #读取图块更新史，……
+            with open(self.data_folder+'/'+'update_history.json','r') as f:
+                update_history = json.load(f)
+        except FileNotFoundError:   #……若文件不存在（第一次爬）则创建它所在的目录
+                if not os.path.exists(self.data_folder):
+                    os.makedirs(self.data_folder)
+
+        to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
+        save_to  = self.getImgdir(self.image_folder)
+        with concurrent.futures.ThreadPoolExecutor (max_workers=self.max_threads) as executor:  #抓图工人池
+            for index,value in enumerate(executor.map(self.visitPath,to_crawl,save_to)):
+                pass
+            
+        with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
+            json.dump(update_history,f,indent=2)
+
+#-----------------------------------------------------------------
+
+
+
+
 
     '''每天运行，探测选定区域内的图块信息但不下载图片，收录抓取日志，收录`活跃度`大型dict'''
     def runsDaily(self):
         Figure_404=Figure_Fail=Figure_ignore=Figure_added=Figure_update=Figure_changed=0
+        
         download=False      #日更不下载图片，只收录图片头长度发生了变化的图块信息
         log_buffer={}
         download_queue=[]
@@ -214,7 +264,7 @@ class crawler(): #以后传配置文件
             #with open(self.data_folder+'/'+'update_history.txt','w') as f:
             #    f.write('{}')#先写个空dict防呆
 
-        to_crawl=self.makePicName(self.crawl_zones,self.crawl_level)   #一个生成器
+        to_crawl=self.makePicName(self.crawl_zones,self.target_depth)   #一个生成器
         save_to=self.getImgdir(self.image_folder,download)
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:    #抓图工人线程池
             for pic_info in executor.map(self.dealWithPicurl,to_crawl,save_to,self.whetherDownload(download)): 
