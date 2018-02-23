@@ -47,3 +47,7 @@ elif test_number == 107:
 elif test_number == 108:
     cr=crawl.crawler()
     cr.changeJsonKey()
+
+elif test_number == 109:
+    cr=crawl.crawler()
+    cr.runsDaily2()

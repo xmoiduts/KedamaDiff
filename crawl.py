@@ -39,20 +39,13 @@ class crawler(): #以后传配置文件
         #print(r.headers['Last-Modified'],r.headers['Content-Length']) #404-"KeyError"error.
     '''
 
-    '''下载给定URL的文件并返回。
-    def getImage(self,URL):
-        r=requests.get(URL,stream='True')
-        if r.status_code==200:
-            img=r.raw.read()
-            return img
-    '''
-    def downloadImage(self,URL,dir_filename):
+    '''下载给定URL的文件并返回。'''
+    def downloadImage(self,URL):
         r = requests.get(URL,stream = 'True')
-        if i.status_code = 200:
+        if r.status_code == 200:
             img = r.raw.read()
-            with open(dir_filename,'wb') as f:
-                        f.write(img)
-                        f.close()
+            return img
+
 
 
     '''输入[多个可采集区域的前缀]和采集深度，生成['pic_name','文件名']。'''
@@ -171,7 +164,7 @@ class crawler(): #以后传配置文件
             with open(self.data_folder+'/'+'update_history.json','w') as f:#写回 图块更新史文件
                 json.dump(new_log_buffer,f,indent=2)
 
-    '''抓图线程'''
+    '''抓图线程
     def dealWithPicurl(self,pic_tuple,save_to,download=False):
         url=self.map_domain+'/'+self.map_name+pic_tuple[0]+'?'+str(int(time.time()))
         filename=pic_tuple[1]
@@ -188,6 +181,7 @@ class crawler(): #以后传配置文件
                 return({'Filename':filename,'ERROR':'Fail'})
             except requests.exceptions.ReadTimeout:
                 return({'Filename':filename,'ERROR':'Fail'})
+    '''
 
     '''永远返回/image_folder/年月日'''
     '''我也不想写这个的，但是直接传image_folder值,后面的executor.map()就只能执行17次'''
@@ -205,16 +199,7 @@ class crawler(): #以后传配置文件
             yield download
     '''
 
-    def visitPath(self,path,dir):#抓取单张图片并对响应进行处理,图片存储在dir
-        URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
-        r=requests.head(URL,timeout=5)  #Head操作
-        if r.status_code == 404 :       #【404，pass】
-            print('404\t\t'+path)
-        elif r.status_code == 200 :
-            file_name = self.path2xy(path) + '.jpg'
-            if file_name not in update_history :    #【库里无该图，Add】
-                downloadImage(URL,dir + self.path2xy(path,self.total_depth) + '.jpg' )
-            
+
 
 
     '''每日运行的抓图存图函数，第一次运行创建路径和数据文件，全量下/存图片，后续只下载ETag变动的图片并保存SHA1变动的图片，一轮完成而不是先head再get'''
@@ -231,21 +216,38 @@ class crawler(): #以后传配置文件
                     os.makedirs(self.data_folder)
 
         to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
-        save_to  = self.getImgdir(self.image_folder)
+        save_in  = self.getImgdir(self.image_folder)
+
+        def visitPath(super,path):#抓取单张图片并对响应进行处理,图片存储在dir
+            URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
+            r=requests.head(URL,timeout=5)  #Head操作
+            if r.status_code == 404 :       #【404，pass】
+                print('404\t\t'+path)
+            elif r.status_code == 200 :
+                file_name = self.path2xy(path,self.total_depth) + '.jpg'
+                if file_name not in update_history :    #【库里无该图，Add】
+                    img = self.downloadImage(URL)
+                    update_history[file_name] = ([{'Save_in':next(save_in),'ETag':img.headers['ETag']}])
+                    with open(next(save_in)+file_name,'wb') as f:
+                        f.write(img)
+                        f.close()
+
         with concurrent.futures.ThreadPoolExecutor (max_workers=self.max_threads) as executor:  #抓图工人池
-            for index,value in enumerate(executor.map(self.visitPath,to_crawl,save_to)):
+            for index,value in enumerate(executor.map(visitPath,to_crawl)):
                 pass
             
         with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
             json.dump(update_history,f,indent=2)
 
+        
+            
 #-----------------------------------------------------------------
 
 
 
 
 
-    '''每天运行，探测选定区域内的图块信息但不下载图片，收录抓取日志，收录`活跃度`大型dict'''
+    '''每天运行，探测选定区域内的图块信息但不下载图片，收录抓取日志，收录`活跃度`大型dict
     def runsDaily(self):
         Figure_404=Figure_Fail=Figure_ignore=Figure_added=Figure_update=Figure_changed=0
         
@@ -321,7 +323,7 @@ class crawler(): #以后传配置文件
 
         #with open(self.data_folder+'/'+'update_history.json','w') as f:#写回 图块更新史文件
         #    json.dump(log_buffer,f,indent=2)
-        
+        '''
 
 
 '''每周运行，和上周的图片信息比较并下载Etag的图块，保存SHA1变动了的图片到当天的文件夹里，收录`图片历史`大型json。
