@@ -131,7 +131,7 @@ class crawler(): #以后传配置文件
         print("\nTotal zoom depth:",depth)
         return depth
 
-    '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’'''
+    '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’，只会用到一次'''
     def changeImgName(self):
         #先改图片名，再改历史记录
         prevwd = os.getcwd()
@@ -148,6 +148,19 @@ class crawler(): #以后传配置文件
             os.chdir('..')
         os.chdir(prevwd)
         print('changing back to',os.getcwd())
+
+    '''升级更新历史文件，该函数只用一次'''
+    def changeJsonKey(self):
+        with open(self.data_folder+'/'+'update_history.json','r') as f:
+            log_buffer=json.load(f)
+            new_log_buffer = {}
+            for origin_key in log_buffer.keys():
+                path = origin_key.split('.')[0].replace('_','/')
+                XY = self.path2xy(path,11)
+                new_key = str(self.target_depth)+'_'+str(XY[0])+'_'+str(XY[1])+'.jpg'
+                new_log_buffer [new_key] = log_buffer[origin_key]
+            with open(self.data_folder+'/'+'update_history.json','w') as f:#写回 图块更新史文件
+                json.dump(new_log_buffer,f,indent=2)
 
     '''抓图线程'''
     def dealWithPicurl(self,pic_tuple,save_to,download=False):

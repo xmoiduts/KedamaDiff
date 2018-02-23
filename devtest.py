@@ -43,3 +43,7 @@ elif test_number == 106:
 elif test_number == 107:
     cr=crawl.crawler()
     cr.changeImgName()
+
+elif test_number == 108:
+    cr=crawl.crawler()
+    cr.changeJsonKey()
