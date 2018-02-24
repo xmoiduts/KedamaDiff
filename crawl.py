@@ -28,7 +28,7 @@ class crawler(): #以后传配置文件
         else:
             self.total_depth= self.fetchTotalDepth()        #缩放级别总数
         self.target_depth= -3                               #目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.crawl_zones=[(0,0),64,32]
+        self.crawl_zones=[((0,0),64,32)]
         self.timestamp = str(int(time.time()))
         # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854  
 
@@ -231,10 +231,12 @@ class crawler(): #以后传配置文件
                     with open(next(save_in)+file_name,'wb') as f:
                         f.write(img)
                         f.close()
+            return '1'
 
         with concurrent.futures.ThreadPoolExecutor (max_workers=self.max_threads) as executor:  #抓图工人池
-            for index,value in enumerate(executor.map(visitPath,to_crawl)):
-                pass
+            print(to_crawl,visitPath)
+            for index in executor.map(visitPath,to_crawl):
+                print('a')
             
         with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
             json.dump(update_history,f,indent=2)
