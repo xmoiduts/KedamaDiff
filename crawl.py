@@ -5,6 +5,9 @@ import ast,json
 import hashlib
 import logging
 import itertools
+from functools import reduce
+import win_unicode_console
+win_unicode_console.enable()    #解决VSCode的输出异常问题
 
 class wannengError(Exception):
     def __init__(self, value):
@@ -28,7 +31,7 @@ class crawler(): #以后传配置文件
         else:
             self.total_depth= self.fetchTotalDepth()        #缩放级别总数
         self.target_depth= -3                               #目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.crawl_zones=[((0,0),64,32)]
+        self.crawl_zones=[((0,0),4,32)]
         self.timestamp = str(int(time.time()))
         # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854  
 
@@ -44,7 +47,7 @@ class crawler(): #以后传配置文件
         r = requests.get(URL,stream = 'True')
         if r.status_code == 200:
             img = r.raw.read()
-            return img
+            return {'headers' : r.headers , 'image' : img}
 
 
 
@@ -191,6 +194,7 @@ class crawler(): #以后传配置文件
         while(True):
             if not os.path.exists(new_dir):
                 os.makedirs(new_dir)
+                print('Made directory\t./'+new_dir)
             yield new_dir
 
     '''返回是否下载
@@ -205,10 +209,10 @@ class crawler(): #以后传配置文件
     '''每日运行的抓图存图函数，第一次运行创建路径和数据文件，全量下/存图片，后续只下载ETag变动的图片并保存SHA1变动的图片，一轮完成而不是先head再get'''
     def runsDaily2(self):
         statistics_count = {'404':0,'Fail':0,'Ignore':0,'Added':0,'Update':0,'Replace':0}   #统计抓图状态
-        update_history = [] #更新历史
+        update_history = {} #更新历史
         
 
-        try:    #读取图块更新史，……
+        try:                        #读取图块更新史，……
             with open(self.data_folder+'/'+'update_history.json','r') as f:
                 update_history = json.load(f)
         except FileNotFoundError:   #……若文件不存在（第一次爬）则创建它所在的目录
@@ -218,25 +222,28 @@ class crawler(): #以后传配置文件
         to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
         save_in  = self.getImgdir(self.image_folder)
 
-        def visitPath(super,path):#抓取单张图片并对响应进行处理,图片存储在dir
+        def visitPath(path):#抓取单张图片并对响应进行处理,图片存储在dir
             URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
             r=requests.head(URL,timeout=5)  #Head操作
             if r.status_code == 404 :       #【404，pass】
                 print('404\t\t'+path)
             elif r.status_code == 200 :
-                file_name = self.path2xy(path,self.total_depth) + '.jpg'
+                XY = self.path2xy(path,self.total_depth)
+                file_name = reduce(lambda a,b:a+b ,map(str,[self.target_depth,'_',XY[0],'_',XY[1],'.jpg']))
                 if file_name not in update_history :    #【库里无该图，Add】
-                    img = self.downloadImage(URL)
-                    update_history[file_name] = ([{'Save_in':next(save_in),'ETag':img.headers['ETag']}])
+                    response = self.downloadImage(URL)
+                    update_history[file_name] = ([{'Save_in':next(save_in),'ETag':response['headers']['ETag']}])
                     with open(next(save_in)+file_name,'wb') as f:
-                        f.write(img)
+                        f.write(response['image'])
                         f.close()
+                    print('Adding\t'+path+'.jpg as '+file_name)
+                else:
+                    print(file_name+'\t\tin history,temporily ignore.')   
             return '1'
 
         with concurrent.futures.ThreadPoolExecutor (max_workers=self.max_threads) as executor:  #抓图工人池
-            print(to_crawl,visitPath)
             for index in executor.map(visitPath,to_crawl):
-                print('a')
+                pass
             
         with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
             json.dump(update_history,f,indent=2)
