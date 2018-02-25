@@ -222,6 +222,14 @@ class crawler(): #以后传配置文件
         to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
         save_in  = self.getImgdir(self.image_folder)
 
+        def addNewImg(URL,file_name,):
+            response = self.downloadImage(URL)
+            update_history[file_name] = ([{'Save_in':next(save_in),'ETag':response['headers']['ETag']}])
+            with open(next(save_in)+file_name,'wb') as f:
+                f.write(response['image'])
+                f.close()
+            print('Adding\t'+path+'.jpg as '+file_name)
+
         def visitPath(path):#抓取单张图片并对响应进行处理,图片存储在dir
             URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
             r=requests.head(URL,timeout=5)  #Head操作
@@ -230,13 +238,9 @@ class crawler(): #以后传配置文件
             elif r.status_code == 200 :
                 XY = self.path2xy(path,self.total_depth)
                 file_name = reduce(lambda a,b:a+b ,map(str,[self.target_depth,'_',XY[0],'_',XY[1],'.jpg']))
+
                 if file_name not in update_history :    #【库里无该图，Add】
-                    response = self.downloadImage(URL)
-                    update_history[file_name] = ([{'Save_in':next(save_in),'ETag':response['headers']['ETag']}])
-                    with open(next(save_in)+file_name,'wb') as f:
-                        f.write(response['image'])
-                        f.close()
-                    print('Adding\t'+path+'.jpg as '+file_name)
+                    addNewImg(URL,file_name)
                 else:
                     print(file_name+'\t\tin history,temporily ignore.')   
             return '1'
@@ -245,8 +249,10 @@ class crawler(): #以后传配置文件
             for index in executor.map(visitPath,to_crawl):
                 pass
             
+        print('start dumping')
         with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
-            json.dump(update_history,f,indent=2)
+            json.dump(update_history,f,indent=2,sort_keys=True)
+        print('finish dumping')
 
         
             
