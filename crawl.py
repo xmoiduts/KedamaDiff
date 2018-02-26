@@ -1,4 +1,4 @@
-import requests,os
+import urllib3,requests,os
 import time,datetime
 import concurrent.futures
 import ast,json
@@ -7,7 +7,7 @@ import logging
 import itertools
 from functools import reduce
 import win_unicode_console
-win_unicode_console.enable()    #解决VSCode的输出异常问题
+win_unicode_console.enable()    #解决VSCode on Windows的输出异常问题
 
 class wannengError(Exception):
     def __init__(self, value):
@@ -228,55 +228,68 @@ class crawler(): #以后传配置文件
             with open(next(save_in)+file_name,'wb') as f:
                 f.write(response['image'])
                 f.close()
-            print('Adding\t'+path+'.jpg as '+file_name)
+            ret_msg = 'Adding\t'+path+'.jpg as '+file_name
+            return ret_msg
 
-        def visitPath(path):#抓取单张图片并对响应进行处理,图片存储在dir
-            URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
-            r=requests.head(URL,timeout=5)  #Head操作
-            if r.status_code == 404 :       #【404，pass】
-                print('404\t\t'+path)
-            elif r.status_code == 200 :
-                XY = self.path2xy(path,self.total_depth)
-                file_name = reduce(lambda a,b:a+b ,map(str,[self.target_depth,'_',XY[0],'_',XY[1],'.jpg']))
-
-                if file_name not in update_history :    #【库里无该图，Add】
-                    addNewImg(URL,file_name)
-                else:  # 【库里有该图片，……】
-                    # 【……且ETag不一致（喻示图片已更新）……】
-                    if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
-                        DL_img = self.downloadImage(URL)['image']
-                        In_Stock_Latest = update_history[file_name][-1]['Save_in']+file_name
-                        with open(In_Stock_Latest, 'rb') as Prev_img:
-                            # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
-                            if hashlib.sha1(Prev_img.read()).hexdigest() != hashlib.sha1(DL_img).hexdigest():
-                                if update_history[file_name][-1]['Save_in'] == next(save_in) + file_name:
-                                    del update_history[file_name][-1]
-                                    print('\t\tReplaced', file_name)  # warn
-                                else:
-                                    print('\t\tUpdated', file_name)  # info
-                                update_history[file_name].append(
-                                    {'Save_in': next(save_in), 'ETag': r.headers['ETag']})  
-                                with open(next(save_in)+file_name, 'wb') as f:
-                                        f.write(DL_img)
-                                        f.close()
-                            else:
-                                pass    #【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+        def processBySHA1(URL, response ,file_name):
+            DL_img = self.downloadImage(URL)['image']
+            In_Stock_Latest = update_history[file_name][-1]['Save_in'] + file_name
+            with open(In_Stock_Latest , 'rb') as Prev_img:
+                # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
+                if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
+                    if update_history[file_name][-1]['Save_in'] == next(save_in) + file_name:
+                        #【同一天内两次抓到的图片发生了偏差，用一种dirty hack来处理】
+                        del update_history[file_name][-1]
+                        ret_msg = 'Replaced\t' + file_name    # warn
                     else:
-                        pass    #【……但ETag一致（喻示图片未更新）】
+                        ret_msg = 'Updated\t\t'+ file_name    # info
+                    update_history[file_name].append(
+                        {'Save_in': next(save_in), 'ETag': response.headers['ETag']})  
+                    with open(next(save_in)+file_name, 'wb') as f:
+                            f.write(DL_img)
+                            f.close()
+                else:
+                    ret_msg = 'Fake-update\t' + file_name       #【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+                return ret_msg
 
+        def visitPath(path):#抓取单张图片并对响应进行处理的工人
+            URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
+            tryed_time = 0
+            while True:
+                try:
+                    r=requests.head(URL,timeout=5)  #Head操作
+                    if r.status_code == 404 :       #【404，pass】
+                        ret_msg = '404\t\t' + path
+                    elif r.status_code == 200 :
+                        XY = self.path2xy(path,self.total_depth)
+                        file_name = reduce(lambda a,b:a+b ,map(str,[self.target_depth,'_',XY[0],'_',XY[1],'.jpg']))
 
-                        
-                    print(file_name+'\t\tin history,temporily ignore.')   
-            return '1'
+                        if file_name not in update_history :    #【库里无该图，Add】
+                            ret_msg = addNewImg(URL,file_name)
+                        else:  # 【库里有该图片，……】
+                            # 【……且ETag不一致（喻示图片已更新）……】
+                            if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
+                                ret_msg = processBySHA1(URL , r , file_name)                          
+                            else:
+                                ret_msg = 'Ignored\t\t' + file_name    #【……但ETag一致（喻示图片未更新）】
+                    return ret_msg            
+                except (requests.exceptions.ReadTimeout , requests.exceptions.ConnectionError , urllib3.exceptions.ReadTimeoutError) as e :
+                    print('Error No.' , tryed_time , 'for\t' , path , e )
+                    tryed_time += 1
+                    if tryed_time >= 5:
+                        ret_msg = 'Abandon\t\t' + path
+                        return ret_msg
+
+            
 
         with concurrent.futures.ThreadPoolExecutor (max_workers=self.max_threads) as executor:  #抓图工人池
-            for index in executor.map(visitPath,to_crawl):
-                pass
+            for msg in executor.map(visitPath,to_crawl):
+                print(msg)
             
-        print('start dumping')
+        print('start dumping json')
         with open(self.data_folder+'/'+'update_history.json','w') as f:#更新历史写回文件
             json.dump(update_history,f,indent=2,sort_keys=True)
-        print('finish dumping')
+        print('finish dumping json')
 
         
             
