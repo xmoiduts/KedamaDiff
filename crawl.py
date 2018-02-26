@@ -31,7 +31,7 @@ class crawler(): #以后传配置文件
         else:
             self.total_depth= self.fetchTotalDepth()        #缩放级别总数
         self.target_depth= -3                               #目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.crawl_zones=[((0,0),4,32)]
+        self.crawl_zones=[((0,0),64,32)]                    #追踪变迁历史的区域，对于毛线v2是 [((0,0),64,32)]
         self.timestamp = str(int(time.time()))
         # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854  
 
@@ -131,7 +131,7 @@ class crawler(): #以后传配置文件
             except Exception as e:
                 print(e)
                 errors += 1
-                if errors >= 3:
+                if errors >= 5:
                     raise e
         print("\nTotal zoom depth:",depth)
         return depth
