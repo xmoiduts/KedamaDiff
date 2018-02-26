@@ -1,10 +1,12 @@
 import urllib3,requests,os
 import time,datetime
-import concurrent.futures
+import concurrent.futures,threading
 import ast,json
 import hashlib
 import logging
 import itertools
+from collections import Iterable
+from collections import Iterator
 from functools import reduce
 import win_unicode_console
 win_unicode_console.enable()    #解决VSCode on Windows的输出异常问题
@@ -15,6 +17,17 @@ class wannengError(Exception):
     def __str__(self):
         return repr(self.value)
 
+class threadsafe_generator():
+    def __init__ (self,gen):
+        self.gen = gen
+        self.lock = threading.Lock()
+
+    def __iter__ (self):
+        return next(self)
+
+    def next(self):
+        with self.lock:
+            return next(self.gen)
 
 class crawler(): #以后传配置文件
     def __init__ (self,test=False):
@@ -24,7 +37,7 @@ class crawler(): #以后传配置文件
         self.image_folder=r'images/'+self.map_name          #图块存哪
         self.data_folder =r'data/'+self.map_name            #更新历史存哪（以后升级数据库？）
         '''抓取设置'''
-        self.max_threads=16                                 #线程数
+        self.max_threads = 32                              #线程数
 
         if test == True:
             self.total_depth = 15
@@ -129,7 +142,7 @@ class crawler(): #以后传配置文件
                 else:
                     raise wannengError(r.status_code)
             except Exception as e:
-                print(e)
+                print(e , errors )
                 errors += 1
                 if errors >= 5:
                     raise e
@@ -221,11 +234,14 @@ class crawler(): #以后传配置文件
 
         to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
         save_in  = self.getImgdir(self.image_folder)
+        save_in  = threadsafe_generator (save_in)
+        print("save_in: Iterator;Iterable",isinstance(save_in,Iterator),isinstance(save_in,Iterable))
+        #return 0
 
         def addNewImg(URL,file_name):
             response = self.downloadImage(URL)
-            update_history[file_name] = ([{'Save_in':next(save_in),'ETag':response['headers']['ETag']}])
-            with open(next(save_in)+file_name,'wb') as f:
+            update_history[file_name] = ([{'Save_in':save_in.next(),'ETag':response['headers']['ETag']}])
+            with open(save_in.next()+file_name,'wb') as f:
                 f.write(response['image'])
                 f.close()
             ret_msg = 'Adding\t'+path+'.jpg as '+file_name
@@ -237,15 +253,15 @@ class crawler(): #以后传配置文件
             with open(In_Stock_Latest , 'rb') as Prev_img:
                 # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
                 if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
-                    if update_history[file_name][-1]['Save_in'] == next(save_in) + file_name:
+                    if update_history[file_name][-1]['Save_in'] == save_in.next() + file_name:
                         #【同一天内两次抓到的图片发生了偏差，用一种dirty hack来处理】
                         del update_history[file_name][-1]
                         ret_msg = 'Replaced\t' + file_name    # warn
                     else:
                         ret_msg = 'Updated\t\t'+ file_name    # info
                     update_history[file_name].append(
-                        {'Save_in': next(save_in), 'ETag': response.headers['ETag']})  
-                    with open(next(save_in)+file_name, 'wb') as f:
+                        {'Save_in': save_in.next(), 'ETag': response.headers['ETag']})  
+                    with open(save_in.next()+file_name, 'wb') as f:
                             f.write(DL_img)
                             f.close()
                 else:

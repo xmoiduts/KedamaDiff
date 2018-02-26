@@ -49,5 +49,5 @@ elif test_number == 108:
     cr.changeJsonKey()
 
 elif test_number == 109:
-    cr=crawl.crawler()
+    cr=crawl.crawler(test=True)
     cr.runsDaily2()
