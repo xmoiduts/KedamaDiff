@@ -35,16 +35,16 @@ class crawler(): #以后传配置文件
         self.timestamp = str(int(time.time()))
         # https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854  
 
-    '''输入图块链接，返回              错误处理应该改进吧     
-    def teaseImage(self,URL):
+    '''输入图块链接，返回              错误处理应该改进吧     '''
+    def headImage(self,URL):
         r=requests.head(URL,timeout=5) #只取响应头而不下载响应体
         return r.headers
         #print(r.headers['Last-Modified'],r.headers['Content-Length']) #404-"KeyError"error.
-    '''
+    
 
     '''下载给定URL的文件并返回。'''
     def downloadImage(self,URL):
-        r = requests.get(URL,stream = 'True')
+        r = requests.get(URL,stream = 'True',timeout = 5)
         if r.status_code == 200:
             img = r.raw.read()
             return {'headers' : r.headers , 'image' : img}
@@ -222,7 +222,7 @@ class crawler(): #以后传配置文件
         to_crawl = self.makePicXY(self.crawl_zones,self.target_depth)    #生成要抓取的图片坐标
         save_in  = self.getImgdir(self.image_folder)
 
-        def addNewImg(URL,file_name,):
+        def addNewImg(URL,file_name):
             response = self.downloadImage(URL)
             update_history[file_name] = ([{'Save_in':next(save_in),'ETag':response['headers']['ETag']}])
             with open(next(save_in)+file_name,'wb') as f:
@@ -241,7 +241,31 @@ class crawler(): #以后传配置文件
 
                 if file_name not in update_history :    #【库里无该图，Add】
                     addNewImg(URL,file_name)
-                else:
+                else:  # 【库里有该图片，……】
+                    # 【……且ETag不一致（喻示图片已更新）……】
+                    if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
+                        DL_img = self.downloadImage(URL)['image']
+                        In_Stock_Latest = update_history[file_name][-1]['Save_in']+file_name
+                        with open(In_Stock_Latest, 'rb') as Prev_img:
+                            # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
+                            if hashlib.sha1(Prev_img.read()).hexdigest() != hashlib.sha1(DL_img).hexdigest():
+                                if update_history[file_name][-1]['Save_in'] == next(save_in) + file_name:
+                                    del update_history[file_name][-1]
+                                    print('\t\tReplaced', file_name)  # warn
+                                else:
+                                    print('\t\tUpdated', file_name)  # info
+                                update_history[file_name].append(
+                                    {'Save_in': next(save_in), 'ETag': r.headers['ETag']})  
+                                with open(next(save_in)+file_name, 'wb') as f:
+                                        f.write(DL_img)
+                                        f.close()
+                            else:
+                                pass    #【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+                    else:
+                        pass    #【……但ETag一致（喻示图片未更新）】
+
+
+                        
                     print(file_name+'\t\tin history,temporily ignore.')   
             return '1'
 
