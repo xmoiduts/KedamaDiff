@@ -1,15 +1,17 @@
-import urllib3
-import requests
-import os
-import time
-import datetime
 import concurrent.futures
-import threading
-import json
+import datetime
 import hashlib
-import logging
 import itertools
+import json
+import logging
+import os
+import threading
+import time
 from functools import reduce
+
+import requests
+import urllib3
+
 try:
     import win_unicode_console  # pip安装
     win_unicode_console.enable()  # 解决VSCode on Windows的输出异常问题
@@ -17,7 +19,7 @@ except:
     pass  # 不装这个包，只要不在VScode下运行也不一定有问题
 
 
-class wannengError(Exception):
+class wannengError(Exception):  # 练习写个异常？
     def __init__(self, value):
         self.value = value
 
@@ -42,7 +44,7 @@ class crawler():  # 以后传配置文件
     def __init__(self, test=False):
         '''文件/路径设置'''
         self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        self.map_name = 'v2_daytime'  # 地图名称
+        self.map_name = 'v1_daytime'  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         '''抓取设置'''
@@ -58,10 +60,24 @@ class crawler():  # 以后传配置文件
         self.timestamp = str(int(time.time()))
         #一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854
 
-    '''下载给定URL的文件并返回。'''
-    '''别瞎改，改了(1)次又改回来了'''
-
     def downloadImage(self, URL):
+        """下载给定URL的文件并返回
+
+        别瞎改，改了(1)次又改回来了
+
+        Args: 
+            URL (str): URL of the image which is going to be downloaded.
+
+        Returns:
+            dict: The response headers of the given URL, the image object.
+
+        Raises:
+            requests.exceptions.ReadTimeout,
+            requests.exceptions.ConnectionError,
+            urllib3.exceptions.ReadTimeoutError
+            
+            Let the caller function handle these errors."""
+
         r = requests.get(URL, stream='True', timeout=5)
         if r.status_code == 200:
             img = r.raw.read()
@@ -72,12 +88,22 @@ class crawler():  # 以后传配置文件
     * 坐标系中X向右变大，Y向上变大'''
 
     # func ([ ( (12,4),4,8 ) , …… ] , -2 )
-    def makePicXY(self, zoneLists, target_depth):
+    def makePath(self, zoneLists, depth):
+        """生成给定观察区域的图片path。
+
+        从上到下生成每列中的path，从左到右处理各列。
+
+        Args:
+            zonelists (list of tuple): contains a list of zones that we are watching.
+                zones (tuple): (center_X,center_Y), width, height
+                    center_X, center_Y (int): The center of a watch zone.
+                    width (int): The horizontal image-block numbers at the given zoom depth.
+                    height (int) : The vertical image-block numbers at the given zoom depth."""
         for center, width, height in zoneLists:  # 开始对给定的区域**之一**生成坐标
-            X_list = [X for X in range(center[0]-width*2**-target_depth, center[0] +
-                                       width*2**-target_depth) if (X / (2**-target_depth)) % 2 == 1]
-            Y_list = [Y for Y in range(center[1]+height*2**-target_depth, center[1] -
-                                       height*2**-target_depth, -1) if (Y / (2**-target_depth)) % 2 == 1]
+            X_list = [X for X in range(center[0]-width*2**-depth, center[0] +
+                                       width*2**-depth) if (X / (2**-depth)) % 2 == 1]
+            Y_list = [Y for Y in range(center[1]+height*2**-depth, center[1] -
+                                       height*2**-depth, -1) if (Y / (2**-depth)) % 2 == 1]
             for XY in itertools.product(X_list, Y_list):  # 求两个列表的笛卡尔积
                 yield self.xy2Path(XY, self.total_depth)
 
@@ -192,6 +218,7 @@ class crawler():  # 以后传配置文件
         today = datetime.datetime.today().strftime('%Y%m%d')
         new_dir = dir+'/'+today+'/'
         while(True):
+            time.sleep(0.03)  # 不想输出太快
             if not os.path.exists(new_dir):
                 os.makedirs(new_dir)
                 print('Made directory\t./'+new_dir)
@@ -211,7 +238,7 @@ class crawler():  # 以后传配置文件
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
 
-        to_crawl = self.makePicXY(
+        to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
         save_in = self.getImgdir(self.image_folder)
         save_in = threadsafe_generator(save_in)
@@ -270,7 +297,10 @@ class crawler():  # 以后传配置文件
                                 ret_msg = 'Ignored\t\t' + file_name  # 【……但ETag一致（喻示图片未更新）】
                     return ret_msg
 
-                except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, urllib3.exceptions.ReadTimeoutError) as e:
+                except (
+                        requests.exceptions.ReadTimeout,
+                        requests.exceptions.ConnectionError,
+                        urllib3.exceptions.ReadTimeoutError) as e:
                     print('Error No.', tryed_time, 'for\t', path, e)
                     tryed_time += 1
                     if tryed_time >= 5:
@@ -284,6 +314,7 @@ class crawler():  # 以后传配置文件
                     print(msg)
             except KeyboardInterrupt as e:
                 print(e)
+                print('Exiting……')
                 return 0
 
         print('start dumping json')
