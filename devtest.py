@@ -38,7 +38,7 @@ elif test_number == 105:
 
 elif test_number == 106:
     cr=crawl.crawler(test=True)
-    cr.path2xy('/0/3/3/3/1/2/1/3',11)
+    print(cr.path2xy('/0/3/3/3/3/3/3/2/3/2/3/1',15))
 
 elif test_number == 107:
     cr=crawl.crawler()
