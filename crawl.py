@@ -44,7 +44,7 @@ class crawler():  # 以后传配置文件
     def __init__(self, test=False):
         '''文件/路径设置'''
         self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        self.map_name = 'v1_daytime'  # 地图名称
+        self.map_name = 'v2_daytime'  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         '''抓取设置'''
@@ -259,7 +259,7 @@ class crawler():  # 以后传配置文件
             with open(In_Stock_Latest, 'rb') as Prev_img:
                 # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
                 if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
-                    if update_history[file_name][-1]['Save_in'] == save_in.next() + file_name:
+                    if update_history[file_name][-1]['Save_in'] == save_in.next() :
                         #【同一天内两次抓到的图片发生了偏差，用一种dirty hack来处理】
                         del update_history[file_name][-1]
                         ret_msg = 'Replaced\t' + file_name    # warn
