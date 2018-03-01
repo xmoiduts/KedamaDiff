@@ -30,7 +30,7 @@ elif test_number == 104:
 
 elif test_number == 105:
     cr=crawl.crawler(test=False)
-    gen1=cr.makePicXY([((0,0),4,2)],cr.target_depth)
+    gen1=cr.makePath([((0,0),2,2)],cr.target_depth)
     for XY in gen1:
         print(XY)
     #/0        /3/3/2/3/2/3/1

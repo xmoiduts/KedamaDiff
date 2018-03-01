@@ -1,5 +1,6 @@
 images/*
 logs/*
+log/*
 .vscode
 __pycache__
 *.pyc
