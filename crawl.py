@@ -47,6 +47,8 @@ class crawler():  # 以后传配置文件
         self.map_name = 'v2_daytime'  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
+        self.log_folder = r'log/' + self.map_name  # 日志文件夹
+        self.logger = self.makeLogger()
         '''抓取设置'''
         self.max_threads = 16  # 线程数
 
@@ -59,6 +61,27 @@ class crawler():  # 以后传配置文件
         self.crawl_zones = [((0, 0), 64, 32)]
         self.timestamp = str(int(time.time()))
         #一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854
+
+    def makeLogger(self):
+        logger = logging.getLogger('root')
+        logger.setLevel(logging.DEBUG)
+        log_path = self.log_folder+'/'+datetime.datetime.today().strftime('%Y%m%d') + \
+            '.log'  # 文件名
+        if not os.path.exists(self.log_folder):
+            os.makedirs(self.log_folder)
+            print('Made directory\t./'+self.log_folder)
+        fh = logging.FileHandler(log_path)
+        ch = logging.StreamHandler()
+        fh.setLevel(logging.DEBUG)
+        ch.setLevel(logging.DEBUG)
+        datefmt_ch = '%H:%M:%S'  # 输出毫秒要改logging的代码，你想清楚就好。
+        fmt_fh = '[%(asctime)s]-[%(levelname).1s:%(funcName)-20.15s] %(message)s'
+        # 屏幕输出相对简短
+        fmt_ch = '[%(asctime)s]-[%(levelname).1s:%(funcName).6s] %(message).60s'
+        fh.setFormatter(logging.Formatter(fmt_fh))
+        ch.setFormatter(logging.Formatter(fmt_ch, datefmt_ch))
+        logger.addHandler(fh), logger.addHandler(ch)
+        return logger
 
     def downloadImage(self, URL):
         """下载给定URL的文件并返回
@@ -128,28 +151,25 @@ class crawler():  # 以后传配置文件
             val_Y += (2 * tmp_Y - 1) * (2 ** p)
             tmp = tmp_X * 2 + tmp_Y
             path += table[tmp]
-        #print(path)
         return path
 
     '''由图块路径转坐标，传入的坐标已被筛选，保证是第(total_depth+target_depth)级图片的中心点'''
 
     def path2xy(self, path, depth):  # '/0/3/3/3/1/2/1/3' 不要丢掉开头的'/'哟;本地图的总层数;
-        #print("Inbound:",path)
         in_list = map(int, path.split('/')[1:])
         X, Y = (0, 0)
         table = [1, 3, 0, 2]
         for index, value in enumerate(in_list):
             X += (table[value]//2-0.5)*2**(depth-index)  # 需要整数除
             Y += (table[value] % 2-0.5)*2**(depth-index)
-        #print(int(X),int(Y))
         return(int(X), int(Y))
 
     '''逐层爬取图块，探测当下地图一共多少层,硬编码取地图中心点右上的图块/1 /1/2 /1/2/2 ……
     若受网络等影响未获取到值，则整个脚本退出。'''
 
     def fetchTotalDepth(self):
-        print("Working on", self.map_name,
-              "to figure out its zoom levels", end='', flush=True)
+        self.logger.info(
+            'Working on {} to figure out its zoom levels'.format(self.map_name))
         depth = 0
         path = '/1'
         errors = 0
@@ -169,11 +189,12 @@ class crawler():  # 以后传配置文件
                 else:
                     raise wannengError(r.status_code)
             except Exception as e:
-                print(e, errors)
+                self.logger.error('Err {} : {}'.format(errors, e))
                 errors += 1
                 if errors >= 5:
                     raise e
-        print("\nTotal zoom depth:", depth)
+        print()
+        self.logger.info("Total zoom depth: {}".format(depth))
         return depth
 
     '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’，只用来批量重命名老版本脚本下载的图片'''
@@ -221,7 +242,7 @@ class crawler():  # 以后传配置文件
             time.sleep(0.03)  # 不想输出太快
             if not os.path.exists(new_dir):
                 os.makedirs(new_dir)
-                print('Made directory\t./'+new_dir)
+                self.logger.info('Made directory\t./{}'.format(new_dir))
             yield new_dir
 
     '''每日运行的抓图存图函数，第一次运行创建路径和数据文件，全量下/存图片，后续只下载ETag变动的图片并保存SHA1变动的图片，一轮完成而不是先head再get'''
@@ -250,7 +271,7 @@ class crawler():  # 以后传配置文件
             with open(save_in.next()+file_name, 'wb') as f:
                 f.write(response['image'])
                 f.close()
-            ret_msg = 'Adding\t\t'+path+'.jpg as '+file_name
+            ret_msg = 'Add\t{}.jpg as {}'.format(path, file_name)
             return ret_msg
 
         def processBySHA1(URL, response, file_name):
@@ -259,19 +280,20 @@ class crawler():  # 以后传配置文件
             with open(In_Stock_Latest, 'rb') as Prev_img:
                 # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
                 if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
-                    if update_history[file_name][-1]['Save_in'] == save_in.next() :
+                    if update_history[file_name][-1]['Save_in'] == save_in.next():
                         #【同一天内两次抓到的图片发生了偏差，用一种dirty hack来处理】
                         del update_history[file_name][-1]
-                        ret_msg = 'Replaced\t' + file_name    # warn
+                        ret_msg = 'Rep\t{}'.format(file_name)      # warn
                     else:
-                        ret_msg = 'Updated\t\t' + file_name    # info
+                        ret_msg = 'Upd\t{}'.format(file_name)     # info
                     update_history[file_name].append(
                         {'Save_in': save_in.next(), 'ETag': response.headers['ETag']})
                     with open(save_in.next()+file_name, 'wb') as f:
                             f.write(DL_img)
                             f.close()
                 else:
-                    ret_msg = 'Fake-update\t' + file_name  # 【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+                    # 【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+                    ret_msg = 'nMOD\t{}'.format(file_name)
                 return ret_msg
 
         def visitPath(path):  # 抓取单张图片并对响应进行处理的工人
@@ -281,7 +303,7 @@ class crawler():  # 以后传配置文件
                 try:
                     r = requests.head(URL, timeout=5)  # Head操作
                     if r.status_code == 404:  # 【404，pass】
-                        ret_msg = '404\t\t' + path
+                        ret_msg = '404\t{}'.format(path)
                     elif r.status_code == 200:
                         XY = self.path2xy(path, self.total_depth)
                         file_name = reduce(
@@ -294,33 +316,36 @@ class crawler():  # 以后传配置文件
                             if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
                                 ret_msg = processBySHA1(URL, r, file_name)
                             else:
-                                ret_msg = 'Ignored\t\t' + file_name  # 【……但ETag一致（喻示图片未更新）】
+                                ret_msg = 'Ign\t{}'.format(
+                                    file_name)  # 【……但ETag一致（喻示图片未更新）】
                     return ret_msg
 
                 except (
                         requests.exceptions.ReadTimeout,
                         requests.exceptions.ConnectionError,
                         urllib3.exceptions.ReadTimeoutError) as e:
-                    print('Error No.', tryed_time, 'for\t', path, e)
+                    self.logger.error(
+                        'No.{} for\t{}\t{}'.format(tryed_time, path, e))
                     tryed_time += 1
                     if tryed_time >= 5:
-                        ret_msg = 'Abandon\t\t' + path
+                        ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
 
         # 抓图工人池
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:
             try:
                 for msg in executor.map(visitPath, to_crawl):
-                    print(msg)
-            except KeyboardInterrupt as e:
-                print(e)
-                print('Exiting……')
+                    self.logger.warn(
+                        msg) if 'Fail' in msg or 'Rep' in msg else self.logger.info(msg)
+            except KeyboardInterrupt:
+                self.logger.warn('User pressed ctrl+c.')
+                self.logger.warn('Will exit when other threads return.')
                 return 0
 
-        print('start dumping json')
+        self.logger.debug('Start dumping json at {}'.format(time.time()))
         with open(self.data_folder+'/'+'update_history.json', 'w') as f:  # 更新历史写回文件
             json.dump(update_history, f, indent=2, sort_keys=True)
-        print('finish dumping json')
+        self.logger.debug('json dumped at {}'.format(time.time()))
 
 
 def main():
