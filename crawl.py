@@ -43,26 +43,32 @@ class threadsafe_generator():
 class crawler():  # 以后传配置文件
     def __init__(self, test=False):
         '''文件/路径设置'''
+        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
         self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        self.map_name = 'v2_daytime'  # 地图名称
+        self.map_name = 'v1_daytime'  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         self.log_folder = r'log/' + self.map_name  # 日志文件夹
         self.logger = self.makeLogger()
         '''抓取设置'''
-        self.max_threads = 16  # 线程数
-
-        if test == True:
-            self.total_depth = 15
-        else:
-            self.total_depth = self.fetchTotalDepth()  # 缩放级别总数
+        self.max_threads = 12  # 线程数
+        self.total_depth = 13 if test == True else self.fetchTotalDepth() # 缩放级别总数
         self.target_depth = -3  # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        # 追踪变迁历史的区域，对于毛线v2是 [((0,0),64,32)]
-        self.crawl_zones = [((0, 0), 64, 32)]
-        self.timestamp = str(int(time.time()))
-        #一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854
+        # 追踪变迁历史的区域，对于毛线v2是 [((0, -8), 56, 29)] for v1/v2
+        self.crawl_zones = [((0, -8), 56, 29)]
+        self.timestamp = str(int(time.time())) # 请求图块要用
+        
 
     def makeLogger(self):
+        """申请并配置抓取器所用到的日志记录器
+
+        若日志文件夹不存在将被创建，向终端输出长度较短的文本，向日志文件写入完整长度的报告
+
+        Todo: 每次抓取摘要：时间，抓取地图，抓取结果统计[，存储配额剩余容量]
+        
+        Args: None
+
+        Returns: instance of `logging`"""
         logger = logging.getLogger('root')
         logger.setLevel(logging.DEBUG)
         log_path = self.log_folder+'/'+datetime.datetime.today().strftime('%Y%m%d') + \
@@ -106,22 +112,19 @@ class crawler():  # 以后传配置文件
             img = r.raw.read()
             return {'headers': r.headers, 'image': img}
 
-    '''给定[（抓取区域中心点（X,Y坐标），目标缩放深度下横向抓取图块数量，纵向抓取图块数量），……]，目标缩放深度，
-    返回一个生成器，按照每列中由上到下，各列从左向右的顺序产出"目标缩放深度_X_Y.jpg"
-    * 坐标系中X向右变大，Y向上变大'''
-
-    # func ([ ( (12,4),4,8 ) , …… ] , -2 )
     def makePath(self, zoneLists, depth):
-        """生成给定观察区域的图片path。
+        """生成给定观察区域的图块路径。
 
-        从上到下生成每列中的path，从左到右处理各列。
+        从左到右处理各列，从上到下生成每列中的path。
 
-        Args:
+        Args: eg. : [((0, -8), 56, 29)] , -3
             zonelists (list of tuple): contains a list of zones that we are watching.
                 zones (tuple): (center_X,center_Y), width, height
                     center_X, center_Y (int): The center of a watch zone.
                     width (int): The horizontal image-block numbers at the given zoom depth.
-                    height (int) : The vertical image-block numbers at the given zoom depth."""
+                    height (int) : The vertical image-block numbers at the given zoom depth.
+            depth (int): target zoom depth, should be a negative number."""
+
         for center, width, height in zoneLists:  # 开始对给定的区域**之一**生成坐标
             X_list = [X for X in range(center[0]-width*2**-depth, center[0] +
                                        width*2**-depth) if (X / (2**-depth)) % 2 == 1]
@@ -130,10 +133,16 @@ class crawler():  # 以后传配置文件
             for XY in itertools.product(X_list, Y_list):  # 求两个列表的笛卡尔积
                 yield self.xy2Path(XY, self.total_depth)
 
-    '''由图块坐标生成图块路径'''
+    def xy2Path(self, XY, depth):
+        """由图块坐标生成图块路径
+        
+        Args: Eg. : (12,4) , 4
+            XY (int,int): The X and Y coordinates for the project-defined coordinate system. 
+            depth (int): The total zoom-levels for the given overviewer map.
+        
+        Returns: Eg. : '/0/3/3/3/1/2/1/3'
+            path(str): Path of the img block.  """
 
-    def xy2Path(self, XY, depth):  # ((12,4),4)
-        #需要坐标和地图总层数来生成完整path
         X = XY[0]
         Y = XY[1]  # 期望坐标值
         table = ['/2', '/0', '/3', '/1']
@@ -153,9 +162,16 @@ class crawler():  # 以后传配置文件
             path += table[tmp]
         return path
 
-    '''由图块路径转坐标，传入的坐标已被筛选，保证是第(total_depth+target_depth)级图片的中心点'''
+    def path2xy(self, path, depth):
+        """由图块路径转项目定义的坐标。
+        
+        传参时应保证path与给定爬图等级相符，即 path = total_depth + target_depth 
+        
+        Args: E.g. : '/0/3/3/3/1/2/1/3' , 15
+            path (int) : The overviewer img block path to convert.
+                P.S.: The '/' in the beginning is needed
+            depth (int) : The total zoom-levels for the given overviewer map."""
 
-    def path2xy(self, path, depth):  # '/0/3/3/3/1/2/1/3' 不要丢掉开头的'/'哟;本地图的总层数;
         in_list = map(int, path.split('/')[1:])
         X, Y = (0, 0)
         table = [1, 3, 0, 2]
@@ -164,10 +180,20 @@ class crawler():  # 以后传配置文件
             Y += (table[value] % 2-0.5)*2**(depth-index)
         return(int(X), int(Y))
 
-    '''逐层爬取图块，探测当下地图一共多少层,硬编码取地图中心点右上的图块/1 /1/2 /1/2/2 ……
+    '''
     若受网络等影响未获取到值，则整个脚本退出。'''
 
     def fetchTotalDepth(self):
+        """逐层爬取图块，探测给定的Overviewer地图一共多少层
+
+        按照它们生成地图的规则，硬编码取最靠近地图坐标原点右上方的图块，例如 /1 /1/2 /1/2/2 ……
+        该函数返回crawler类初始化所需的参数，若发生异常则脚本文件应当退出，而不能向下执行。
+
+        Args: None
+
+        Returns:
+            depth (int): The total zoom-levels for the given overviewer map."""
+
         self.logger.info(
             'Working on {} to figure out its zoom levels'.format(self.map_name))
         depth = 0
@@ -197,9 +223,10 @@ class crawler():  # 以后传配置文件
         self.logger.info("Total zoom depth: {}".format(depth))
         return depth
 
-    '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’，只用来批量重命名老版本脚本下载的图片'''
-
     def changeImgName(self):
+        '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’，只用来批量重命名老版本脚本下载的图片
+        
+        函数已废弃'''
         #先改图片名，再改历史记录
         prevwd = os.getcwd()
         os.chdir(self.image_folder)
@@ -217,9 +244,10 @@ class crawler():  # 以后传配置文件
         os.chdir(prevwd)
         print('changing back to', os.getcwd())
 
-    '''升级_更新历史_文件，该函数只用一次'''
-
     def changeJsonKey(self):
+        '''升级 _更新历史_文件
+        
+        该函数已废弃'''
         with open(self.data_folder+'/'+'update_history.json', 'r') as f:
             log_buffer = json.load(f)
             new_log_buffer = {}
@@ -232,10 +260,17 @@ class crawler():  # 以后传配置文件
             with open(self.data_folder+'/'+'update_history.json', 'w') as f:  # 写回 图块更新史文件
                 json.dump(new_log_buffer, f, indent=2)
 
-    '''永远返回/image_folder/年月日'''
-    '''我也不想写这个的，但是直接传image_folder值,后面的executor.map()就只能执行17次'''
-
     def getImgdir(self, dir):
+        """返回保存该地图今日更新了的图块的文件夹地址
+        
+        保存每张图片前都会检查，若文件夹不存在将被创建。
+
+        Args: Eg. : (.)'/images/v2_daytime'
+            dir(str) : Where all images are saved.
+
+        Yields: Eg. : (.)'/images/v2_daytime/20180202/'
+            new_dir (str) : Where to save the images being crawled today."""
+
         today = datetime.datetime.today().strftime('%Y%m%d')
         new_dir = dir+'/'+today+'/'
         while(True):
@@ -245,9 +280,13 @@ class crawler():  # 以后传配置文件
                 self.logger.info('Made directory\t./{}'.format(new_dir))
             yield new_dir
 
-    '''每日运行的抓图存图函数，第一次运行创建路径和数据文件，全量下/存图片，后续只下载ETag变动的图片并保存SHA1变动的图片，一轮完成而不是先head再get'''
+    '''，，一轮完成而不是先head再get'''
 
     def runsDaily(self):
+        """每日运行的抓图存图函数，抓取一个Overviewer地图的图片
+        
+        第一次运行创建路径和数据文件，全量下/存图片，
+        后续每次只下载ETag变动的图片并保存其中SHA1变动的图片(约占前者的1/3?)"""
         statistics_count = {'404': 0, 'Fail': 0, 'Ignore': 0,
                             'Added': 0, 'Update': 0, 'Replace': 0}  # 统计抓图状态
         update_history = {}  # 更新历史
@@ -265,6 +304,13 @@ class crawler():  # 以后传配置文件
         save_in = threadsafe_generator(save_in)
 
         def addNewImg(path, URL, file_name):
+            """向文件系统和更新历史记录中添加新图片
+            
+            Args: 
+                URL (str): The url of a specific image.
+                file_name (str): What to save the img as.
+            Returns:
+                ret_msg (str): The log message of the very image."""
             response = self.downloadImage(URL)
             update_history[file_name] = (
                 [{'Save_in': save_in.next(), 'ETag': response['headers']['ETag']}])
@@ -275,51 +321,77 @@ class crawler():  # 以后传配置文件
             return ret_msg
 
         def processBySHA1(URL, response, file_name):
+            """下载图块并根据摘要来处理文件
+            
+            适用于站点最新图片和本地保存的最新图片ETag不同的时候
+            
+            Args:
+                URL (str) : The url of a specific image.
+                response : The response of head(url).
+                file_name (str): What to save the img as.
+            
+            Returns:
+                ret_msg (str): The log message of the very image."""
+
             DL_img = self.downloadImage(URL)['image']
             In_Stock_Latest = update_history[file_name][-1]['Save_in'] + file_name
             with open(In_Stock_Latest, 'rb') as Prev_img:
-                # 【……且SHA1不一致，（喻示图片发生了实质性修改）】
+                # SHA1不一致，喻示图片发生了实质性修改
                 if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
+                    # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
                     if update_history[file_name][-1]['Save_in'] == save_in.next():
-                        #【同一天内两次抓到的图片发生了偏差，用一种dirty hack来处理】
                         del update_history[file_name][-1]
-                        ret_msg = 'Rep\t{}'.format(file_name)      # warn
+                        ret_msg = 'Rep\t{}'.format(file_name)
                     else:
-                        ret_msg = 'Upd\t{}'.format(file_name)     # info
+                        ret_msg = 'Upd\t{}'.format(file_name)
                     update_history[file_name].append(
                         {'Save_in': save_in.next(), 'ETag': response.headers['ETag']})
                     with open(save_in.next()+file_name, 'wb') as f:
                             f.write(DL_img)
                             f.close()
                 else:
-                    # 【……但SHA1一致，（喻示图片无实质性变化）忽略该不同】
+                    # SHA1一致，图片无实质性变化，则忽略该不同
                     ret_msg = 'nMOD\t{}'.format(file_name)
                 return ret_msg
 
-        def visitPath(path):  # 抓取单张图片并对响应进行处理的工人
-            URL = self.map_domain + '/' + self.map_name + path + '.jpg?c=' + self.timestamp
+        def visitPath(path):  #
+            """抓取单张图片并对响应进行处理的工人
+            
+            对每张图片进行最多5次下载尝试，如果还是下不来就放弃这张图片
+            
+            Args: Eg. : /0/3/3/3/3/3/3/2/3/2/3/1
+                path (str): The overviewer img block path to download.
+
+            Returns:
+                ret_msg (str): The log message of the very image."""
+
+            URL = '{}/{}{}.jpg?c={}'.format(self.map_domain,
+                                            self.map_name, path, self.timestamp)
             tryed_time = 0
             while True:
                 try:
-                    r = requests.head(URL, timeout=5)  # Head操作
-                    if r.status_code == 404:  # 【404，pass】
+                    r = requests.head(URL, timeout=5)
+                    # 404--图块不存在
+                    if r.status_code == 404:
                         ret_msg = '404\t{}'.format(path)
+                    # 200--OK
                     elif r.status_code == 200:
                         XY = self.path2xy(path, self.total_depth)
-                        file_name = reduce(
-                            lambda a, b: a+b, map(str, [self.target_depth, '_', XY[0], '_', XY[1], '.jpg']))
-
-                        if file_name not in update_history:  # 【库里无该图，Add】
+                        file_name = '{}_{}_{}.jpg'.format(
+                            self.target_depth, XY[0], XY[1])
+                        # 库里无该图--Add
+                        if file_name not in update_history:
                             ret_msg = addNewImg(path, URL, file_name)
-                        else:  # 【库里有该图片，……】
-                            # 【……且ETag不一致（喻示图片已更新）……】
+                        # 库里有该图片
+                        else:
+                            # ETag不一致--丢给下一级处理
                             if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
                                 ret_msg = processBySHA1(URL, r, file_name)
+                            # ETag一致--只出个log
                             else:
-                                ret_msg = 'Ign\t{}'.format(
-                                    file_name)  # 【……但ETag一致（喻示图片未更新）】
+                                ret_msg = 'Ign\t{}'.format(file_name)
                     return ret_msg
-
+                # 网络遇到问题，重试最多5次
                 except (
                         requests.exceptions.ReadTimeout,
                         requests.exceptions.ConnectionError,
@@ -331,7 +403,8 @@ class crawler():  # 以后传配置文件
                         ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
 
-        # 抓图工人池
+        # 维护一个抓图线程池
+        # Todo: 复用抓图网络连接，减少全程发出的连接数
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:
             try:
                 for msg in executor.map(visitPath, to_crawl):
@@ -343,7 +416,8 @@ class crawler():  # 以后传配置文件
                 return 0
 
         self.logger.debug('Start dumping json at {}'.format(time.time()))
-        with open(self.data_folder+'/'+'update_history.json', 'w') as f:  # 更新历史写回文件
+        # 将今天的抓图情况写回更新历史文件
+        with open(self.data_folder+'/'+'update_history.json', 'w') as f:
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
 

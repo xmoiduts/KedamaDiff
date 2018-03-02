@@ -20,7 +20,7 @@ elif test_number == 102:
     
 elif test_number == 103:
     cr=crawl.crawler()
-    toCrawl = cr.makePicXY([((12,4),4,8)],-3)  
+    toCrawl = cr.makePath([((12,4),4,8)],-3)  
     for i in toCrawl:
         print(i)
 
@@ -50,4 +50,9 @@ elif test_number == 108:
 
 elif test_number == 109:
     cr=crawl.crawler(test=True)
-    cr.runsDaily2()
+    cr.runsDaily()
+
+elif test_number == 110:
+    cr=crawl.crawler(test=True)
+    for x in list(cr.makePath(cr.crawl_zones, cr.target_depth)):
+        print(cr.path2xy(x,cr.total_depth))
