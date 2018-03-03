@@ -45,7 +45,7 @@ class crawler():  # 以后传配置文件
         '''文件/路径设置'''
         '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
         self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        self.map_name = 'v1_daytime'  # 地图名称
+        self.map_name = 'v2_daytime'  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         self.log_folder = r'log/' + self.map_name  # 日志文件夹
@@ -391,17 +391,17 @@ class crawler():  # 以后传配置文件
                             else:
                                 ret_msg = 'Ign\t{}'.format(file_name)
                     return ret_msg
+                except ( KeyboardInterrupt ) as e:
+                    raise e
                 # 网络遇到问题，重试最多5次
-                except (
-                        requests.exceptions.ReadTimeout,
-                        requests.exceptions.ConnectionError,
-                        urllib3.exceptions.ReadTimeoutError) as e:
+                except Exception as e:
                     self.logger.error(
                         'No.{} for\t{}\t{}'.format(tryed_time, path, e))
                     tryed_time += 1
                     if tryed_time >= 5:
                         ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
+                
 
         # 维护一个抓图线程池
         # Todo: 复用抓图网络连接，减少全程发出的连接数
