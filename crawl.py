@@ -51,7 +51,7 @@ class crawler():  # 以后传配置文件
         self.log_folder = r'log/' + self.map_name  # 日志文件夹
         self.logger = self.makeLogger()
         '''抓取设置'''
-        self.max_threads = 12  # 线程数
+        self.max_threads = 16  # 线程数
         self.total_depth = 13 if test == True else self.fetchTotalDepth() # 缩放级别总数
         self.target_depth = -3  # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         # 追踪变迁历史的区域，对于毛线v2是 [((0, -8), 56, 29)] for v1/v2
