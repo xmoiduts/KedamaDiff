@@ -66,7 +66,7 @@ class crawler():
         '''抓取设置'''
         self.max_threads = config['max_crawl_threads']  # 最大抓图线程数
         # 缩放级别总数
-        self.total_depth = config['last_total_depth'] if debug == True else self.fetchTotalDepth(
+        self.total_depth = config['last_total_depth'] if noFetch == True else self.fetchTotalDepth(
         )
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         self.target_depth = config['target_depth']
