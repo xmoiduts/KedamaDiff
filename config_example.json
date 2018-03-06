@@ -1,0 +1,19 @@
+//请将此配置文件复制为config.json，不要在此直接修改。
+{
+  "v1_daytime": {
+    "crawl_zones": "[((0, -8), 4, 4)]",
+    "last_total_depth": 15,
+    "map_domain": "https://map.nyaacat.com/kedama",
+    "map_name": "v2_daytime",
+    "max_crawl_threads": 4,
+    "target_depth": -3
+  },
+  "v2_daytime": {
+    "crawl_zones": "[((0, -8), 4, 4)]",
+    "last_total_depth": 13,
+    "map_domain": "https://map.nyaacat.com/kedama",
+    "map_name": "v1_daytime",
+    "max_crawl_threads": 4,
+    "target_depth": -3
+  }
+}

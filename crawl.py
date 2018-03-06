@@ -1,3 +1,4 @@
+import ast
 import concurrent.futures
 import datetime
 import hashlib
@@ -41,23 +42,31 @@ class threadsafe_generator():
 
 
 class crawler():  # 以后传配置文件
-    def __init__(self, test=False):
-        '''文件/路径设置'''
-        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
-        self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        self.map_name = 'v2_daytime'  # 地图名称
+    def __init__(self,config, test=False,debug=False):
+
+        self.map_domain = config['map_domain']
+        self.map_name = config['map_name']        
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         self.log_folder = r'log/' + self.map_name  # 日志文件夹
         self.logger = self.makeLogger()
+        self.max_threads = config['max_crawl_threads']
+        self.total_depth = config['last_total_depth'] if debug == True else self.fetchTotalDepth()
+        self.target_depth = config['target_depth']
+        self.crawl_zones =  ast.literal_eval(config['crawl_zones'])
+
+        '''文件/路径设置'''
+        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
+        #self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
+        #self.map_name = 'v2_daytime'  # 地图名称
+
         '''抓取设置'''
-        self.max_threads = 16  # 线程数
-        self.total_depth = 13 if test == True else self.fetchTotalDepth() # 缩放级别总数
-        self.target_depth = -3  # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
+        #self.max_threads = 4  # 线程数
+        #self.total_depth = 13 if test == True else self.fetchTotalDepth() # 缩放级别总数
+        #self.target_depth = -3  # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         # 追踪变迁历史的区域，对于毛线v2是 [((0, -8), 56, 29)] for v1/v2
-        self.crawl_zones = [((0, -8), 56, 29)]
-        self.timestamp = str(int(time.time())) # 请求图块要用
-        
+        #self.crawl_zones = [((0, -8), 56, 29)]
+        self.timestamp = str(int(time.time())) # 请求图块要用  
 
     def makeLogger(self):
         """申请并配置抓取器所用到的日志记录器
@@ -69,7 +78,7 @@ class crawler():  # 以后传配置文件
         Args: None
 
         Returns: instance of `logging`"""
-        logger = logging.getLogger('root')
+        logger = logging.getLogger(self.map_name)
         logger.setLevel(logging.DEBUG)
         log_path = self.log_folder+'/'+datetime.datetime.today().strftime('%Y%m%d') + \
             '.log'  # 文件名
@@ -421,10 +430,17 @@ class crawler():  # 以后传配置文件
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
 
-
 def main():
-    cr = crawler()
-    cr.runsDaily()
+    with open ('config.json','r+') as f:
+        configs = json.load(f)
+        for map_name in configs.keys() :
+            cr = crawler(configs[map_name]) 
+            cr.runsDaily()
+            if configs[map_name]['last_total_depth'] != cr.total_depth:
+                configs[map_name]['last_total_depth'] = cr.total_depth
+        f.seek(0)
+        json.dump(configs,f,indent = 2,sort_keys = True)
+        f.truncate()
 
 
 if __name__ == '__main__':
