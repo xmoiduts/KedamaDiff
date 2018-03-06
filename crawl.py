@@ -28,7 +28,7 @@ class wannengError(Exception):  # 练习写个异常？
         return repr(self.value)
 
 
-class threadsafe_generator():
+class threadsafe_generator():  # 解决多个线程同时抢占一个生成器导致的错误，乖乖排队去吧您们
     def __init__(self, gen):
         self.gen = gen
         self.lock = threading.Lock()
@@ -41,32 +41,37 @@ class threadsafe_generator():
             return next(self.gen)
 
 
-class crawler():  # 以后传配置文件
-    def __init__(self,config, test=False,debug=False):
+class crawler():
+    def __init__(self, config, noFetch=False):
+        """
+        初始化图片抓取器
 
-        self.map_domain = config['map_domain']
-        self.map_name = config['map_name']        
+        从配置文件读取各种路径
+
+        Args: 
+            config (dict): See ./config_example.json for detail.
+            noFetch (bool): Skip fetchTotalDepth() when set to True. 
+                            Save your time when not interacting with overviewer map.                    
+        """
+        '''文件/路径设置'''
+        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
+        self.map_domain = config['map_domain']  # Overviewer地图地址
+        self.map_name = config['map_name']  # 地图名称
         self.image_folder = r'images/'+self.map_name  # 图块存哪
         self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
         self.log_folder = r'log/' + self.map_name  # 日志文件夹
-        self.logger = self.makeLogger()
-        self.max_threads = config['max_crawl_threads']
-        self.total_depth = config['last_total_depth'] if debug == True else self.fetchTotalDepth()
-        self.target_depth = config['target_depth']
-        self.crawl_zones =  ast.literal_eval(config['crawl_zones'])
-
-        '''文件/路径设置'''
-        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
-        #self.map_domain = 'https://map.nyaacat.com/kedama'  # Overviewer地图地址
-        #self.map_name = 'v2_daytime'  # 地图名称
+        self.logger = self.makeLogger()  # 日志记录器
+        self.timestamp = str(int(time.time()))  # 请求图块要用
 
         '''抓取设置'''
-        #self.max_threads = 4  # 线程数
-        #self.total_depth = 13 if test == True else self.fetchTotalDepth() # 缩放级别总数
-        #self.target_depth = -3  # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        # 追踪变迁历史的区域，对于毛线v2是 [((0, -8), 56, 29)] for v1/v2
-        #self.crawl_zones = [((0, -8), 56, 29)]
-        self.timestamp = str(int(time.time())) # 请求图块要用  
+        self.max_threads = config['max_crawl_threads']  # 最大抓图线程数
+        # 缩放级别总数
+        self.total_depth = config['last_total_depth'] if debug == True else self.fetchTotalDepth(
+        )
+        # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
+        self.target_depth = config['target_depth']
+        # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
+        self.crawl_zones = ast.literal_eval(config['crawl_zones'])
 
     def makeLogger(self):
         """申请并配置抓取器所用到的日志记录器
@@ -400,7 +405,7 @@ class crawler():  # 以后传配置文件
                             else:
                                 ret_msg = 'Ign\t{}'.format(file_name)
                     return ret_msg
-                except ( KeyboardInterrupt ) as e:
+                except (KeyboardInterrupt) as e:
                     raise e
                 # 网络遇到问题，重试最多5次
                 except Exception as e:
@@ -410,7 +415,6 @@ class crawler():  # 以后传配置文件
                     if tryed_time >= 5:
                         ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
-                
 
         # 维护一个抓图线程池
         # Todo: 复用抓图网络连接，减少全程发出的连接数
@@ -430,16 +434,17 @@ class crawler():  # 以后传配置文件
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
 
+
 def main():
-    with open ('config.json','r+') as f:
+    with open('config.json', 'r+') as f:
         configs = json.load(f)
-        for map_name in configs.keys() :
-            cr = crawler(configs[map_name]) 
+        for map_name in configs.keys():
+            cr = crawler(configs[map_name])
             cr.runsDaily()
             if configs[map_name]['last_total_depth'] != cr.total_depth:
                 configs[map_name]['last_total_depth'] = cr.total_depth
         f.seek(0)
-        json.dump(configs,f,indent = 2,sort_keys = True)
+        json.dump(configs, f, indent=2, sort_keys=True)
         f.truncate()
 
 
