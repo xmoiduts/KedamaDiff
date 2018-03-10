@@ -1,6 +1,5 @@
 import ast
 import concurrent.futures
-import datetime
 import hashlib
 import itertools
 import json
@@ -8,6 +7,7 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime
 from functools import reduce
 
 import requests
@@ -57,11 +57,14 @@ class crawler():
         '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
         self.map_domain = config['map_domain']  # Overviewer地图地址
         self.map_name = config['map_name']  # 地图名称
-        self.image_folder = r'images/'+self.map_name  # 图块存哪
-        self.data_folder = r'data/'+self.map_name  # 更新历史存哪（以后升级数据库？）
-        self.log_folder = r'log/' + self.map_name  # 日志文件夹
+        self.image_folder = 'images/{}'.format(self.map_name)  # 图块存哪
+        self.data_folder = 'data/{}'.format(self.map_name)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder = 'log/{}'.format(self.map_name)  # 日志文件夹
+
+        os.environ['TZ'] = 'Asia/Shanghai'
+        self.today = datetime.today().strftime('%Y%m%d')
         self.logger = self.makeLogger()  # 日志记录器
-        self.timestamp = str(int(time.time()))  # 请求图块要用
+        self.timestamp = str(int(time.time()))  # 请求图块要用，时区无关
 
         '''抓取设置'''
         self.max_threads = config['max_crawl_threads']  # 最大抓图线程数
@@ -85,9 +88,8 @@ class crawler():
         Returns: instance of `logging`"""
         logger = logging.getLogger(self.map_name)
         logger.setLevel(logging.DEBUG)
-        log_path = self.log_folder+'/'+datetime.datetime.today().strftime('%Y%m%d') + \
-            '.log'  # 文件名
-        if not os.path.exists(self.log_folder):
+        log_path = '{}/{}.log'.format(self.log_folder, self.today)  # 文件名
+        if not os.path.exists(self.log_folder):  # 初次运行，创建log文件夹
             os.makedirs(self.log_folder)
             print('Made directory\t./'+self.log_folder)
         fh = logging.FileHandler(log_path)
@@ -97,7 +99,7 @@ class crawler():
         datefmt_ch = '%H:%M:%S'  # 输出毫秒要改logging的代码，你想清楚就好。
         fmt_fh = '[%(asctime)s]-[%(levelname).1s:%(funcName)-20.15s] %(message)s'
         # 屏幕输出相对简短
-        fmt_ch = '[%(asctime)s]-[%(levelname).1s:%(funcName).6s] %(message).60s'
+        fmt_ch = '[%(asctime)s.%(msecs)03d]-[%(levelname).1s:%(funcName).6s] %(message).60s'
         fh.setFormatter(logging.Formatter(fmt_fh))
         ch.setFormatter(logging.Formatter(fmt_ch, datefmt_ch))
         logger.addHandler(fh), logger.addHandler(ch)
@@ -209,17 +211,20 @@ class crawler():
             depth (int): The total zoom-levels for the given overviewer map."""
 
         self.logger.info(
+            '------')
+        self.logger.info(
             'Working on {} to figure out its zoom levels'.format(self.map_name))
         depth = 0
         path = '/1'
         errors = 0
         while True:  # do-while 循环结构的一种改写
 
-            url = self.map_domain+'/'+self.map_name + \
-                path+'.jpg?'+str(int(time.time()))
+            URL = '{}/{}{}.jpg?c={}'.format(self.map_domain,
+                                            self.map_name, path, self.timestamp)
+
             try:
                 print('.', end='', flush=True)  # 只输出，不换行，边爬边输出。
-                r = requests.head(url, timeout=5)
+                r = requests.head(URL, timeout=5)
                 if r.status_code == 404:
                     break
                 elif r.status_code == 200:
@@ -285,10 +290,9 @@ class crawler():
         Yields: Eg. : (.)'/images/v2_daytime/20180202/'
             new_dir (str) : Where to save the images being crawled today."""
 
-        today = datetime.datetime.today().strftime('%Y%m%d')
-        new_dir = dir+'/'+today+'/'
+        new_dir = '{}/{}/'.format(dir, self.today)
         while(True):
-            time.sleep(0.03)  # 不想输出太快
+            #time.sleep(0.03)  # 不想输出太快
             if not os.path.exists(new_dir):
                 os.makedirs(new_dir)
                 self.logger.info('Made directory\t./{}'.format(new_dir))
@@ -305,12 +309,16 @@ class crawler():
                             'Added': 0, 'Update': 0, 'Replace': 0}  # 统计抓图状态
         update_history = {}  # 更新历史
 
-        try:  # 读取图块更新史，……
-            with open(self.data_folder+'/'+'update_history.json', 'r') as f:
+        # 读取图块更新史，……
+        try:
+            with open('{}/update_history.json'.format(self.data_folder), 'r') as f:
                 update_history = json.load(f)
-        except FileNotFoundError:  # ……若文件不存在（第一次爬）则创建它所在的目录
+        # ……若文件不存在（第一次爬）则创建它所在的目录
+        except FileNotFoundError:
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
+                    self.logger.info(
+                        'Made directory\t./{}'.format(self.data_folder))
 
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
@@ -430,7 +438,7 @@ class crawler():
 
         self.logger.debug('Start dumping json at {}'.format(time.time()))
         # 将今天的抓图情况写回更新历史文件
-        with open(self.data_folder+'/'+'update_history.json', 'w') as f:
+        with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
 
