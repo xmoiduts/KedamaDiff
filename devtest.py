@@ -1,5 +1,6 @@
 import sys
 import crawl
+import joiner
 
 try:
     test_number=int(sys.argv[1])
@@ -10,6 +11,7 @@ except ValueError:
 
 '''以下是测试项'''
 
+'''
 if test_number == 101:
     cr=crawl.crawler(test=True)
     cr.fetchTotalDepth()
@@ -56,3 +58,12 @@ elif test_number == 110:
     cr=crawl.crawler(test=True)
     for x in list(cr.makePath(cr.crawl_zones, cr.target_depth)):
         print(cr.path2xy(x,cr.total_depth))
+
+'''
+
+if test_number == 111:
+    jr=joiner.joiner()
+    print(list(jr.makeImgName([((12,4),4,8)],-3)))
+elif test_number == 112:
+    jr = joiner.joiner()
+    jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180317')
