@@ -8,7 +8,8 @@ import os
 import threading
 import time
 from datetime import datetime
-from functools import reduce
+#from functools import reduce
+from telegram import Bot
 
 import requests
 import urllib3
@@ -305,8 +306,11 @@ class crawler():
         
         第一次运行创建路径和数据文件，全量下/存图片，
         后续每次只下载ETag变动的图片并保存其中SHA1变动的图片(约占前者的1/3?)"""
+
+        bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
+
         statistics_count = {'404': 0, 'Fail': 0, 'Ignore': 0,
-                            'Added': 0, 'Update': 0, 'Replace': 0}  # 统计抓图状态
+                            'Added': 0, 'Update': 0, 'Replace': 0 , 'unModded':0}  # 统计抓图状态
         update_history = {}  # 更新历史
 
         # 读取图块更新史，……
@@ -363,8 +367,10 @@ class crawler():
                     # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
                     if update_history[file_name][-1]['Save_in'] == save_in.next():
                         del update_history[file_name][-1]
+                        statistics_count['Replace'] += 1
                         ret_msg = 'Rep\t{}'.format(file_name)
                     else:
+                        statistics_count['Update'] += 1
                         ret_msg = 'Upd\t{}'.format(file_name)
                     update_history[file_name].append(
                         {'Save_in': save_in.next(), 'ETag': response.headers['ETag']})
@@ -373,6 +379,7 @@ class crawler():
                             f.close()
                 else:
                     # SHA1一致，图片无实质性变化，则忽略该不同
+                    statistics_count['unModded'] += 1
                     ret_msg = 'nMOD\t{}'.format(file_name)
                 return ret_msg
 
@@ -395,6 +402,7 @@ class crawler():
                     r = requests.head(URL, timeout=5)
                     # 404--图块不存在
                     if r.status_code == 404:
+                        statistics_count['404'] += 1
                         ret_msg = '404\t{}'.format(path)
                     # 200--OK
                     elif r.status_code == 200:
@@ -403,6 +411,7 @@ class crawler():
                             self.target_depth, XY[0], XY[1])
                         # 库里无该图--Add
                         if file_name not in update_history:
+                            statistics_count['Added'] += 1
                             ret_msg = addNewImg(path, URL, file_name)
                         # 库里有该图片
                         else:
@@ -411,6 +420,7 @@ class crawler():
                                 ret_msg = processBySHA1(URL, r, file_name)
                             # ETag一致--只出个log
                             else:
+                                statistics_count['Ignore'] += 1
                                 ret_msg = 'Ign\t{}'.format(file_name)
                     return ret_msg
                 except (KeyboardInterrupt) as e:
@@ -421,6 +431,7 @@ class crawler():
                         'No.{} for\t{}\t{}'.format(tryed_time, path, e))
                     tryed_time += 1
                     if tryed_time >= 5:
+                        statistics_count['Fail'] += 1
                         ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
 
@@ -441,19 +452,24 @@ class crawler():
         with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
+        bot.send_message(176562893,'Crawl result {} for {} : {}'.format(self.today,self.map_name,statistics_count))
 
 
 def main():
-    with open('config.json', 'r+') as f:
-        configs = json.load(f)
-        for map_name in configs.keys():
-            cr = crawler(configs[map_name])
-            cr.runsDaily()
-            if configs[map_name]['last_total_depth'] != cr.total_depth:
-                configs[map_name]['last_total_depth'] = cr.total_depth
-        f.seek(0)
-        json.dump(configs, f, indent=2, sort_keys=True)
-        f.truncate()
+    try:
+        with open('config.json', 'r+') as f:
+            configs = json.load(f)
+            for map_name in configs.keys():
+                cr = crawler(configs[map_name])
+                cr.runsDaily()
+                if configs[map_name]['last_total_depth'] != cr.total_depth:
+                    configs[map_name]['last_total_depth'] = cr.total_depth
+            f.seek(0)
+            json.dump(configs, f, indent=2, sort_keys=True)
+            f.truncate()
+    except Exception as e:
+        bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
+        bot.send_message(176562893,e)
 
 
 if __name__ == '__main__':
