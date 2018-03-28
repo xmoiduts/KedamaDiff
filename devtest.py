@@ -66,4 +66,7 @@ if test_number == 111:
     print(list(jr.makeImgName([((12,4),4,8)],-3)))
 elif test_number == 112:
     jr = joiner.joiner()
-    jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180317')
+    jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180320')
+elif test_number == 113:
+    jr = joiner.joiner()
+    jr.doAJob(jr.makePic2,[((0, -8), 56, 29)],-3,'20180320','20180326')
