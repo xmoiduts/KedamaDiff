@@ -1,7 +1,7 @@
 {
   "v1_daytime": {
     "crawl_zones": "[((0, -8), 56, 29)]",
-    "last_total_depth": 13,
+    "last_total_depth": 9,
     "map_domain": "https://map.nyaacat.com/kedama",
     "map_name": "v1_daytime",
     "max_crawl_threads": 6,
@@ -9,7 +9,7 @@
   },
   "v2_daytime": {
     "crawl_zones": "[((0, -8), 56, 29)]",
-    "last_total_depth": 15,
+    "last_total_depth": 9,
     "map_domain": "https://map.nyaacat.com/kedama",
     "map_name": "v2_daytime",
     "max_crawl_threads": 6,

@@ -92,8 +92,8 @@ class joiner():
         ---将输入的图片名分成若干个小格子，相同区域变淡。
         Todo : 改所有的384
         目前只比较两个时间点之间的变化，他们之间若有些日子更新目前却不能考虑。以后加上'''
-        tile_size = 8   #单个小格子包含的像素数
-        alpha = int(0.30*256)
+        tile_size = 8  #单个小格子包含的像素数
+        alpha = int(0.75*256) #应该传进来
         try:
             file_path_1, file_path_2 = self.findPrev(
                 file_name, img_hist, date1), self.findPrev(file_name, img_hist, date2)

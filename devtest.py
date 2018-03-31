@@ -69,4 +69,4 @@ elif test_number == 112:
     jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180320')
 elif test_number == 113:
     jr = joiner.joiner()
-    jr.doAJob(jr.makePic2,[((0, -8), 56, 29)],-3,'20180320','20180326')
+    jr.doAJob(jr.makePic2,[((0, -8), 56, 29)],-3,'20180323','20180329')
