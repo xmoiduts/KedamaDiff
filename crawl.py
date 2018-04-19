@@ -42,6 +42,24 @@ class threadsafe_generator():  # 解决多个线程同时抢占一个生成器�
             return next(self.gen)
 
 
+class counter():
+    def __init__(self):
+        self.a = {'404': 0, 'Fail': 0, 'Ignore': 0, 'Added': 0,
+                  'Update': 0, 'Replace': 0, 'unModded': 0}
+
+    def plus(self, str):
+        self.a[str] += 1
+
+    def __str__(self):
+        str = ''
+        if self.a['Added'] != 0:
+            str += 'Added:\t{}\n'.format(self.a['Added'])
+        str += 'Update:\t{}\nUnmodded:\t{}\nIgnore:\t{}\n404:\t{}\nFail:\t{}\n'.format(
+            self.a['Update'], self.a['unModded'], self.a['Ignore'], self.a['404'], self.a['Fail'])
+        if self.a['Replace'] != 0:
+            str += 'Replace:\t{}\n'.format(self.a['Replace'])
+        return str
+
 class crawler():
     def __init__(self, config, noFetch=False):
         """
@@ -301,25 +319,7 @@ class crawler():
 
     '''，，一轮完成而不是先head再get'''
 
-    class counter():
-        def __init__(self):
-            self.s404 = 0
-            self.Fail = 0
-            self.Ignore = 0
-            self.Added = 0
-            self.Update = 0
-            self.Replace = 0
-            self.unModded = 0
-        def plus(self,variable)
-            self.variable += 1
-        def __str__(self):
-            str = ''
-            if self.Added != 0:
-                str += 'Added:\t{}\n'.format(self.Added)
-            str += 'Update:\t{}\nUnmodded:\t{}\nIgnore:\t{}\n404:\t{}\nFail:\t{}\n'.format(self.Update,self.unModded,self.Ignore,self.s404,self.Fail)
-            if self.Replace != 0:
-                str += 'Replace:\t{}\n'.format(self.Replace)  
-            return str
+
 
     def runsDaily(self):
         """每日运行的抓图存图函数，抓取一个Overviewer地图的图片
@@ -329,7 +329,7 @@ class crawler():
 
         bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
 
-        statistics =  counter() # 统计抓图状态
+        statistics = counter() # 统计抓图状态
         update_history = {}  # 更新历史
 
         # 读取图块更新史，……
@@ -386,10 +386,10 @@ class crawler():
                     # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
                     if update_history[file_name][-1]['Save_in'] == save_in.next():
                         del update_history[file_name][-1]
-                        statistics.plus(statistics.Replace)
+                        statistics.plus('Replaced')
                         ret_msg = 'Rep\t{}'.format(file_name)
                     else:
-                        statistics.plus(statistics.Update)
+                        statistics.plus('Update')
                         ret_msg = 'Upd\t{}'.format(file_name)
                     update_history[file_name].append(
                         {'Save_in': save_in.next(), 'ETag': response.headers['ETag']})
@@ -398,7 +398,7 @@ class crawler():
                             f.close()
                 else:
                     # SHA1一致，图片无实质性变化，则忽略该不同
-                    statistics.plus(statistics.unModded)
+                    statistics.plus('unModded')
                     ret_msg = 'nMOD\t{}'.format(file_name)
                 return ret_msg
 
@@ -421,7 +421,7 @@ class crawler():
                     r = requests.head(URL, timeout=5)
                     # 404--图块不存在
                     if r.status_code == 404:
-                        statistics.plus(statistics.s404)
+                        statistics.plus('404')
                         ret_msg = '404\t{}'.format(path)
                     # 200--OK
                     elif r.status_code == 200:
@@ -430,7 +430,7 @@ class crawler():
                             self.target_depth, XY[0], XY[1])
                         # 库里无该图--Add
                         if file_name not in update_history:
-                            statistics.plus(statistics.Added)
+                            statistics.plus('Added')
                             ret_msg = addNewImg(path, URL, file_name)
                         # 库里有该图片
                         else:
@@ -439,7 +439,7 @@ class crawler():
                                 ret_msg = processBySHA1(URL, r, file_name)
                             # ETag一致--只出个log
                             else:
-                                statistics.plus(statistics.Ignore)
+                                statistics.plus('Ignore')
                                 ret_msg = 'Ign\t{}'.format(file_name)
                     return ret_msg
                 except (KeyboardInterrupt) as e:
@@ -450,7 +450,7 @@ class crawler():
                         'No.{} for\t{}\t{}'.format(tryed_time, path, e))
                     tryed_time += 1
                     if tryed_time >= 5:
-                        statistics.plus(statistics.Fail)
+                        statistics.plus('Fail')
                         ret_msg = 'Fail\t{}'.format(path)
                         return ret_msg
 
@@ -471,7 +471,7 @@ class crawler():
         with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
             json.dump(update_history, f, indent=2, sort_keys=True)
         self.logger.debug('json dumped at {}'.format(time.time()))
-        bot.send_message(176562893,'Crawl result {} for {} : {}'.format(self.today,self.map_name,statistics))
+        bot.send_message(176562893,'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(statistics)))
 
 
 def main():
