@@ -3,6 +3,7 @@ import hashlib
 import logging
 import os
 from datetime import datetime
+import time
 import itertools
 from PIL import Image, ImageChops
 
@@ -123,7 +124,96 @@ class joiner():
                 return bg
         except FileNotFoundError:
             return Image.new('RGB', (384,384),'blue')
+        
+    def findBetween(self,file_name,img_hist,start,end):
+        #给定文件名、更新历史、起止时间，返回包含该图块的所有文件夹
+        #To do : 这个函数目前还有错误，findPrev不可丢。##改了一下等着去测试吧
+        start = datetime.strptime(start, '%Y%m%d')
+        end = datetime.strptime(end, '%Y%m%d')
+        if end<start:
+            start,end = end,start #日期传反也无妨，我们给你纠正过来
+        result = []
+        for info in reversed(img_hist):#按照日期逆序传入并计算
+            img_date_str = info['Save_in'].split('/')[-2]
+            current = datetime.strptime(img_date_str, '%Y%m%d')
+            if start < current <= end:
+                #self.logger.debug('s:{}, c:{}, e:{}'.format(start,current,end))
+                result.append(info['Save_in'])  
+            elif current <= start:
+                result.append(info['Save_in'])  #图块在start日当天的样子可能是当天或上次更新的图片
+                result.reverse()# 返回NoneType!!!
+                return result #按照日期顺序排列
+        raise StopIteration #没找到
 
+    def makeMatrix(self, file_name, img_hist, start, end):
+        '''起止时间、区域-->0-1变化矩阵-->高斯模糊、归一化-->取阈值生成0-1矩阵-->暴搜-->返回区域'''
+        '''对每个图块生成0-1矩阵'''
+        tile_size, img_size = 8, 384  # Px. #每个tile的边长像素数，图片边长像素数
+        tile_side = img_size // tile_size  # 每张图片边长多少个tile？
+        try:
+            folder_list = self.findBetween(
+                file_name, img_hist, start, end)  # 所有合格的文件夹名
+            if len(folder_list) == 0 or len(folder_list) == 1:  # 没变化，返回全0矩阵(是否妥当)
+                self.logger.info(
+                    '{} didn\'t change in given period.'.format(file_name))
+                matrix = [[0 for x in range(tile_side)]
+                          for y in range(tile_side)]
+                return matrix
+            matrix = [[0 for x in range(tile_side)] for y in range(tile_side)]
+            imgs = [Image.open(folder+file_name) for folder in folder_list]
+            #生成每个tile的位置，内循环从左到右，外循环从上到下
+            bbox_gen = [(tile_size*(x // tile_side), tile_size*(x % tile_side), tile_size*(
+                1+x // tile_side), tile_size*(1+x % tile_side)) for x in range(tile_side**2)]
+            for index, bbox in enumerate(bbox_gen):  # 对于每个tile，遍历图块的全部日期
+                for old, new in [(imgs[i].crop(bbox), imgs[i+1].crop(bbox)) for i in range(len(imgs)-1)]:
+                    if ImageChops.difference(old, new).getbbox() is None:  # 这两天图片没变
+                        pass
+                    else:
+                        matrix[index % tile_side][index //
+                                                  tile_side] = 1  # 炼丹出奇迹
+                        break  # 后面的图块被短路
+            print(matrix)
+            return matrix
+        except Exception as e:
+            self.logger.warn(e)
+            raise e
+
+    def matrixJob(self, core, zone, depth, start_date_str, end_date_str):
+
+        '''分析任务'''
+        '''To do : 即使传入多个区域，但只分析第一个。在未来的修改中，放弃用一个list表示多个区域，而将每个区域作为单独的一次作业'''
+        #初始化二维矩阵：原始数据的0-1矩阵
+        tile_size,img_size = 8 , 384  # 单位：像素
+        if img_size % tile_size != 0:
+            raise ValueError
+        img_tile_length = img_size // tile_size #每张图片边长多少个tile？
+        matrix_size_X, matrix_size_Y = img_tile_length*zone[0][1], img_tile_length*zone[0][2]
+        self.logger.debug('matrix_size_X ,matrix_size_Y = {} , {}'.format(
+            matrix_size_X, matrix_size_Y))
+        # In Python list: 32.5MB RAM used for v2_daytime, exec time <0.5s
+        raw_01matrix = [[0 for x in range(matrix_size_X)]
+                        for y in range(matrix_size_Y)]
+        self.logger.debug('raw_01matrix allocated')
+
+        #拉取所需文件名和更新历史，内循环从上到下，外循环从左到右
+        file_names = self.makeImgName(zone, depth)
+        with open('{}/update_history.json'.format(self.data_folder), 'r') as f:
+            update_history = json.load(f)
+
+        #生成每个文件名对应区域的二维0-1矩阵，并粘贴到raw矩阵中
+        for index , file_name in enumerate(file_names):
+            self.logger.info('Now diffing zone {}'.format(file_name))
+            try:
+                img_hist = update_history[file_name]
+                zone_01matrix = core(file_name,img_hist,start_date_str,end_date_str)
+                X, Y = ((index//zone[0][2])*img_tile_length, (index % zone[0][2])*img_tile_length) #上述矩阵的左上角在全图0-1矩阵中的坐标（但，X,Y分别是二级下标和一级下标）
+                for i in range(len(zone_01matrix)):
+                    raw_01matrix[Y+i][X:X+len(zone_01matrix)] = zone_01matrix[i][:]
+            except KeyError:
+                pass #因为初始数组全0，所以不生成图块范围的0-1矩阵也没事
+
+        print(raw_01matrix)
+        
 
     def doAJob(self, core, zone, depth, date_str, new_date_str=None):
         '''爬一个区域并按照给定规则生成图片
