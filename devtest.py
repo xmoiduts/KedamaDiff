@@ -72,4 +72,4 @@ elif test_number == 113:
     jr.doAJob(jr.makePic2,[((0, 0), 2, 2)],-3,'20180323','20180324')
 elif test_number == 114:
     jr = joiner.joiner()
-    jr.matrixJob(jr.makeMatrix,[((0, 0), 2, 2)],-3,'20180323','20180324')
+    jr.matrixJob(jr.makeMatrix,[((0, -8), 56, 29)],-3,'20180401','2018047')

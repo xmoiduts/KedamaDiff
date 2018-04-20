@@ -148,31 +148,42 @@ class joiner():
     def makeMatrix(self, file_name, img_hist, start, end):
         '''起止时间、区域-->0-1变化矩阵-->高斯模糊、归一化-->取阈值生成0-1矩阵-->暴搜-->返回区域'''
         '''对每个图块生成0-1矩阵'''
-        tile_size, img_size = 8, 384  # Px. #每个tile的边长像素数，图片边长像素数
-        tile_side = img_size // tile_size  # 每张图片边长多少个tile？
+        '''统一一下单位：
+            在拼图器（和分析器）的坐标系中，由小到大分别可设定为 像素pixel，瓷片tile，图块(img),全图。
+            每个瓷片包含整数个像素。每个图块包含整数个瓷片，但图块像素数必须整除瓷片像素数，否则应当抛出异常。
+            本程序中，建议将图片(jpg格式)划分成大小为8*8像素的tile，经测试，tile中任何一像素内容发生改变，
+            都将影响tile中的其他全部像素的值。因此这个尺寸的tile是图片比对结果的最小单位。
+            规定，每瓷片像素数：tile_pixels;本案例中的默认值=8;
+            每图块瓷片数：img_tiles;不设默认值，因瓷片大小不定
+            每图块像素数：img_pixels;本案例中的默认值=384
+            需要注意的是，本坐标系下，二维矩阵个变量的寻址方式是matrix[Y坐标][X坐标]
+            性能：v2_daytime，7天，70s，程序总内存60MB'''
+        tile_pixels, img_pixels = 8, 384  # Px. #每个tile的边长像素数，图片边长像素数
+        img_tiles = img_pixels // tile_pixels  # 每张图片边长多少个tile？
         try:
             folder_list = self.findBetween(
                 file_name, img_hist, start, end)  # 所有合格的文件夹名
             if len(folder_list) == 0 or len(folder_list) == 1:  # 没变化，返回全0矩阵(是否妥当)
                 self.logger.info(
                     '{} didn\'t change in given period.'.format(file_name))
-                matrix = [[0 for x in range(tile_side)]
-                          for y in range(tile_side)]
+                matrix = [[0 for x in range(img_tiles)]
+                          for y in range(img_tiles)]
                 return matrix
-            matrix = [[0 for x in range(tile_side)] for y in range(tile_side)]
+            matrix = [[0 for x in range(img_tiles)] for y in range(img_tiles)]
             imgs = [Image.open(folder+file_name) for folder in folder_list]
             #生成每个tile的位置，内循环从左到右，外循环从上到下
-            bbox_gen = [(tile_size*(x // tile_side), tile_size*(x % tile_side), tile_size*(
-                1+x // tile_side), tile_size*(1+x % tile_side)) for x in range(tile_side**2)]
+            bbox_gen = [(tile_pixels*(x // img_tiles), tile_pixels*(x % img_tiles), tile_pixels*(
+                1+x // img_tiles), tile_pixels*(1+x % img_tiles)) for x in range(img_tiles**2)]
             for index, bbox in enumerate(bbox_gen):  # 对于每个tile，遍历图块的全部日期
                 for old, new in [(imgs[i].crop(bbox), imgs[i+1].crop(bbox)) for i in range(len(imgs)-1)]:
                     if ImageChops.difference(old, new).getbbox() is None:  # 这两天图片没变
                         pass
                     else:
-                        matrix[index % tile_side][index //
-                                                  tile_side] = 1  # 炼丹出奇迹
+                        matrix[index % img_tiles][index //
+                                                  img_tiles] = 1  # 炼丹出奇迹
                         break  # 后面的图块被短路
-            print(matrix)
+            #print(matrix)
+            self.logger.info('Diffed: {}'.format(file_name))
             return matrix
         except Exception as e:
             self.logger.warn(e)
@@ -182,11 +193,12 @@ class joiner():
 
         '''分析任务'''
         '''To do : 即使传入多个区域，但只分析第一个。在未来的修改中，放弃用一个list表示多个区域，而将每个区域作为单独的一次作业'''
+        '''需要一次变量名统一，关于tile的边长和图块的边长'''
         #初始化二维矩阵：原始数据的0-1矩阵
-        tile_size,img_size = 8 , 384  # 单位：像素
-        if img_size % tile_size != 0:
+        tile_pixels,img_pixels = 8 , 384  # 单位：像素
+        if img_pixels % tile_pixels != 0:
             raise ValueError
-        img_tile_length = img_size // tile_size #每张图片边长多少个tile？
+        img_tile_length = img_pixels // tile_pixels #每张图片边长多少个tile？
         matrix_size_X, matrix_size_Y = img_tile_length*zone[0][1], img_tile_length*zone[0][2]
         self.logger.debug('matrix_size_X ,matrix_size_Y = {} , {}'.format(
             matrix_size_X, matrix_size_Y))
@@ -210,9 +222,11 @@ class joiner():
                 for i in range(len(zone_01matrix)):
                     raw_01matrix[Y+i][X:X+len(zone_01matrix)] = zone_01matrix[i][:]
             except KeyError:
+                self.logger.info('{} inexist,skipped'.format(file_name))
                 pass #因为初始数组全0，所以不生成图块范围的0-1矩阵也没事
-
-        print(raw_01matrix)
+        print('Finished analyzing')
+        time.sleep(10)
+        #print(raw_01matrix)
         
 
     def doAJob(self, core, zone, depth, date_str, new_date_str=None):
