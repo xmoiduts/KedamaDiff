@@ -489,6 +489,8 @@ def main():
     except Exception as e:
         bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
         bot.send_message(176562893,e)
+        with open('log/errors.txt') as f:
+            f.write(str(e))
 
 
 if __name__ == '__main__':

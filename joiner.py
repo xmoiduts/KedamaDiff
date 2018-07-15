@@ -124,26 +124,32 @@ class joiner():
                 return bg
         except FileNotFoundError:
             return Image.new('RGB', (384,384),'blue')
+        except StopIteration:
+            return Image.new('RGB', (384,384),'yellow')
         
-    def findBetween(self,file_name,img_hist,start,end):
+    def findBetween(self, file_name, img_hist, start, end):
         #给定文件名、更新历史、起止时间，返回包含该图块的所有文件夹
         #To do : 这个函数目前还有错误，findPrev不可丢。##改了一下等着去测试吧
         start = datetime.strptime(start, '%Y%m%d')
         end = datetime.strptime(end, '%Y%m%d')
-        if end<start:
-            start,end = end,start #日期传反也无妨，我们给你纠正过来
+        if end < start:
+            start, end = end, start  # 日期传反也无妨，我们给你纠正过来
         result = []
-        for info in reversed(img_hist):#按照日期逆序传入并计算
+        for info in reversed(img_hist):  # 按照日期逆序传入并计算
             img_date_str = info['Save_in'].split('/')[-2]
             current = datetime.strptime(img_date_str, '%Y%m%d')
             if start < current <= end:
                 #self.logger.debug('s:{}, c:{}, e:{}'.format(start,current,end))
-                result.append(info['Save_in'])  
+                result.append(info['Save_in'])
             elif current <= start:
-                result.append(info['Save_in'])  #图块在start日当天的样子可能是当天或上次更新的图片
-                result.reverse()# 返回NoneType!!!
-                return result #按照日期顺序排列
-        raise StopIteration #没找到
+                result.append(info['Save_in'])  # 取图块在start日当天的样子，可能是在当天或上次更新的。
+                #break
+        #考虑起始时间早于该图块第一次更新的情况。
+        if len(result) > 0:
+            result.reverse()  # 返回NoneType!!!
+            return result  # 按照日期顺序排列
+        else:
+            raise StopIteration  # 没找到
 
     def makeMatrix(self, file_name, img_hist, start, end):
         '''起止时间、区域-->0-1变化矩阵-->高斯模糊、归一化-->取阈值生成0-1矩阵-->暴搜-->返回区域'''
