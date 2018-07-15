@@ -317,12 +317,10 @@ class crawler():
                 self.logger.info('Made directory\t./{}'.format(new_dir))
             yield new_dir
 
-    '''，，一轮完成而不是先head再get'''
-
-
+    '''，，一轮完成而不是先head再get'''       
 
     def runsDaily(self):
-        """每日运行的抓图存图函数，抓取一个Overviewer地图的图片
+        """每日运行的抓图存图函数，以单个overviewer地图为范围，抓取并更新库中的图片。
         
         第一次运行创建路径和数据文件，全量下/存图片，
         后续每次只下载ETag变动的图片并保存其中SHA1变动的图片(约占前者的1/3?)"""
@@ -331,12 +329,16 @@ class crawler():
 
         statistics = counter() # 统计抓图状态
         update_history = {}  # 更新历史
+        latest_ETag = {} # 每个区块的最新ETag
 
-        # 读取图块更新史，……
+        # 读取图块更新史，若文件不存在则连带所述目录一同创建。
         try:
             with open('{}/update_history.json'.format(self.data_folder), 'r') as f:
                 update_history = json.load(f)
-        # ……若文件不存在（第一次爬）则创建它所在的目录
+
+            with open('{}/latest_ETag.json'.format(self.data_folder), 'r') as f:
+               
+                    latest_ETag = json.load(f)
         except FileNotFoundError:
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
@@ -432,15 +434,17 @@ class crawler():
                         if file_name not in update_history:
                             statistics.plus('Added')
                             ret_msg = addNewImg(path, URL, file_name)
+                            latest_ETag[file_name] = {'ETag' : r.headers['ETag']}
                         # 库里有该图片
                         else:
                             # ETag不一致--丢给下一级处理
-                            if r.headers['ETag'] != update_history[file_name][-1]['ETag']:
+                            if r.headers['ETag'] != latest_ETag[file_name]['ETag']:
                                 ret_msg = processBySHA1(URL, r, file_name)
                             # ETag一致--只出个log
                             else:
                                 statistics.plus('Ignore')
                                 ret_msg = 'Ign\t{}'.format(file_name)
+                        latest_ETag[file_name]['ETag'] = r.headers['ETag']
                     return ret_msg
                 except (KeyboardInterrupt) as e:
                     raise e
@@ -466,13 +470,18 @@ class crawler():
                 self.logger.warn('Will exit when other threads return.')
                 return 0
 
-        self.logger.debug('Start dumping json at {}'.format(time.time()))
         # 将今天的抓图情况写回更新历史文件
+        self.logger.debug('Start dumping json at {}'.format(time.time()))
         with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
             json.dump(update_history, f, indent=2, sort_keys=True)
-        self.logger.debug('json dumped at {}'.format(time.time()))
-        bot.send_message(176562893,'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(statistics)))
-
+            self.logger.debug('update_history dumped at {}'.format(time.time()))
+        with open('{}/latest_ETag.json'.format(self.data_folder), 'w') as f:
+            json.dump(latest_ETag,f,indent=2, sort_keys=True)
+            self.logger.debug('latest_ETag dumped at {}'.format(time.time()))
+        try:
+            bot.send_message(176562893,'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(statistics)))
+        except Exception :
+            self.logger.warning('Telegram bot failed sending {} statistics!'.format(self.map_name))
 
 def main():
     try:
@@ -487,10 +496,12 @@ def main():
             json.dump(configs, f, indent=2, sort_keys=True)
             f.truncate()
     except Exception as e:
+        print(e)        
+        with open('log/errors.txt','a+') as f:
+            print(str(e),file = f)
         bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
-        bot.send_message(176562893,e)
-        with open('log/errors.txt') as f:
-            f.write(str(e))
+        bot.send_message(176562893,'Something went wrong, see logs/errors.txt for detail')
+
 
 
 if __name__ == '__main__':
