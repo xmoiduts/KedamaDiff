@@ -112,14 +112,15 @@ class joiner():
                 tile_width = img1.size[0] // tile_size
                 tile_count = tile_width * (img1.size[1]//tile_size)
                 bg = Image.new('RGBA', img1.size,'white')
+                #扫单个图块中的所有tile
                 bbox_gen = [(tile_size*(x % tile_width), tile_size*(x//tile_width), tile_size*(
                     1+x % tile_width), tile_size*(1+x//tile_width)) for x in range(tile_count)]
                 for bbox in bbox_gen:
                     tile_1,tile_2 = img1.crop(bbox),img2.crop(bbox)
-                    if ImageChops.difference(tile_1, tile_2).getbbox() is None:
+                    if ImageChops.difference(tile_1, tile_2).getbbox() is None:#该tile没变，减淡
                         tile_2.putalpha(alpha)
                         bg.paste(tile_2,bbox,tile_2)
-                    else:
+                    else:#该tile变了，不减淡。
                         bg.paste(tile_2,bbox)
                 return bg
         except FileNotFoundError:
@@ -200,12 +201,13 @@ class joiner():
         '''分析任务'''
         '''To do : 即使传入多个区域，但只分析第一个。在未来的修改中，放弃用一个list表示多个区域，而将每个区域作为单独的一次作业'''
         '''需要一次变量名统一，关于tile的边长和图块的边长'''
+
         #初始化二维矩阵：原始数据的0-1矩阵
         tile_pixels,img_pixels = 8 , 384  # 单位：像素
         if img_pixels % tile_pixels != 0:
             raise ValueError
         img_tile_length = img_pixels // tile_pixels #每张图片边长多少个tile？
-        matrix_size_X, matrix_size_Y = img_tile_length*zone[0][1], img_tile_length*zone[0][2]
+        matrix_size_X, matrix_size_Y = img_tile_length*zone[0][1], img_tile_length*zone[0][2] # 在不再支持传入多个区域后，下标[0]应被删除
         self.logger.debug('matrix_size_X ,matrix_size_Y = {} , {}'.format(
             matrix_size_X, matrix_size_Y))
         # In Python list: 32.5MB RAM used for v2_daytime, exec time <0.5s
@@ -269,3 +271,8 @@ class joiner():
         self.logger.debug('Start saving {}'.format(result_name))
         canvas.save(result_name, format='JPEG', subsampling=0, quality=100)
         self.logger.info('Finished saving {}'.format(result_name))
+
+
+    def matrix2pic(self):
+        '''给定0-1矩阵和范围'''
+        pass

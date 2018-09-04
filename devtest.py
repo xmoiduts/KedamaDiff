@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import crawl
 import joiner
 
@@ -66,10 +66,10 @@ if test_number == 111:
     print(list(jr.makeImgName([((12,4),4,8)],-3)))
 elif test_number == 112:
     jr = joiner.joiner()
-    jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180320')
+    jr.doAJob(jr.makePic1,[((0, -8), 56, 29)],-3,'20180814')
 elif test_number == 113:
     jr = joiner.joiner()
-    jr.doAJob(jr.makePic2,[((0, 0), 2, 2)],-3,'20180323','20180324')
+    jr.doAJob(jr.makePic2,[((0, -8), 56, 29)],-3,'20180818','20180903')
 elif test_number == 114:
     jr = joiner.joiner()
-    jr.matrixJob(jr.makeMatrix,[((0, -8), 56, 29)],-3,'20180401','2018047')
+    jr.matrixJob(jr.makeMatrix,[((0, -8), 56, 29)],-3,'20180710','20180813')
