@@ -1,7 +1,15 @@
 {
+  "nyaa_cat": {
+    "crawl_zones": "[((0, -8), 200, 100)]",
+    "last_total_depth": 0,
+    "map_domain": "https://map.nyaacat.com/nyaa",
+    "map_name": "world_daytime",
+    "max_crawl_threads": 12,
+    "target_depth": -3
+  },
   "v1_daytime": {
     "crawl_zones": "[((0, -8), 56, 29)]",
-    "last_total_depth": 9,
+    "last_total_depth": 0,
     "map_domain": "https://map.nyaacat.com/kedama",
     "map_name": "v1_daytime",
     "max_crawl_threads": 6,
@@ -9,11 +17,19 @@
   },
   "v2_daytime": {
     "crawl_zones": "[((0, -8), 56, 29)]",
-    "last_total_depth": 12,
+    "last_total_depth": 0,
     "map_domain": "https://map.nyaacat.com/kedama",
     "map_name": "v2_daytime",
     "max_crawl_threads": 6,
     "target_depth": -3
+  },
+  "v3_daytime": {
+    "crawl_zones": "[((0, -8), 56, 29)]",
+    "direction": "tl",
+    "last_total_depth": 0,
+    "map_domain": "https://map.nyaacat.com/kedama",
+    "map_name": "v3_daytime",
+    "max_crawl_threads": 6,
+    "target_depth": -2
   }
 }
-

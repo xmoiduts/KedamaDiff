@@ -83,7 +83,7 @@ class joiner():
         
         输入多个日期取date1'''
         file_path = self.findPrev(file_name, img_hist, date1)
-        self.logger.debug(file_path)
+        #self.logger.debug(file_path)
         img = Image.open(file_path + file_name)
         return img
 
@@ -99,14 +99,14 @@ class joiner():
             file_path_1, file_path_2 = self.findPrev(
                 file_name, img_hist, date1), self.findPrev(file_name, img_hist, date2)
             if (file_path_1 == file_path_2) :#同一张图片/*或两张图片但内容相同*/
-                self.logger.debug('{}\tUnchanged'.format(file_name))
+                #self.logger.debug('{}\tUnchanged'.format(file_name))
                 img = Image.open(file_path_2 + file_name)
                 bg = Image.new('RGBA', img.size,'white')
                 img.putalpha(alpha)
                 bg.paste(img,(0,0,img.size[0],img.size[1]),img)
                 return bg
             else:  # 图片是变化的
-                self.logger.debug(file_name)
+                #self.logger.debug(file_name)
                 img1, img2 = Image.open(
                     file_path_1 + file_name), Image.open(file_path_2 + file_name)
                 tile_width = img1.size[0] // tile_size
@@ -126,7 +126,7 @@ class joiner():
         except FileNotFoundError:
             return Image.new('RGB', (384,384),'blue')
         except StopIteration:
-            return Image.new('RGB', (384,384),'yellow')
+            return Image.new('RGB', (384,384),'yellow')#应该是虚空的颜色
         
     def findBetween(self, file_name, img_hist, start, end):
         #给定文件名、更新历史、起止时间，返回包含该图块的所有文件夹
@@ -259,7 +259,7 @@ class joiner():
             except KeyError:  # To do :图片没在库里
                 processed_img = Image.new('RGB', (384, 384), 'black')
             X, Y = ((index//zone[0][2]), (index % zone[0][2]))  # 测试输出值啊……
-            self.logger.debug('{} loaded,pasting,{},{},{}'.format(file_name,X,Y,processed_img.size))
+            #self.logger.debug('{} loaded,pasting,{},{},{}'.format(file_name,X,Y,processed_img.size))
             canvas.paste(processed_img, (384*X, 384*Y, 384*(X+1), 384*(Y+1)))
             self.logger.debug('{} pasted'.format(file_name))
         if not os.path.exists(self.product_folder):  # 初次运行，创建log文件夹
@@ -269,7 +269,8 @@ class joiner():
                                                   self.map_name, depth, zone[0], date_str) if new_date_str == None else '{}/{}_{}_{}_{}_to_{}.jpg'.format(self.product_folder,
                                                                                                                                                           self.map_name, depth, zone[0], date_str, new_date_str)
         self.logger.debug('Start saving {}'.format(result_name))
-        canvas.save(result_name, format='JPEG', subsampling=0, quality=100)
+        canvas.thumbnail((7680,4320), Image.ANTIALIAS)
+        canvas.save(result_name, format='JPEG', subsampling=0, quality=85)
         self.logger.info('Finished saving {}'.format(result_name))
 
 
