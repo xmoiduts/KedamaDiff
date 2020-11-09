@@ -6,3 +6,6 @@ __pycache__
 *.pyc
 
 config.json
+config_bak.json
+config.json
+config.json

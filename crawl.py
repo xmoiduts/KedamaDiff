@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+import pytz
 from datetime import datetime
 #from functools import reduce
 from telegram import Bot
@@ -41,6 +42,18 @@ class threadsafe_generator():  # 解决多个线程同时抢占一个生成器�
         with self.lock:
             return next(self.gen)
 
+class MapTypeHelper():
+    ''' 匹配不同地图的URL路径参数
+    Working on : Overviewer, Mapcrafter
+    
+    '''
+    def __init__(self, name):
+        self.name = name
+    
+    #def
+
+    #map_type = MapTypeHelper(self.getMapType)
+
 
 class counter():
     def __init__(self):
@@ -73,19 +86,24 @@ class crawler():
                             Save your time when not interacting with overviewer map.                    
         """
         '''文件/路径设置'''
-        '''一个正确的链接 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
+        '''一个正确的链接,overviewer版 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
+        '''mapcrafter版： https://map.nyaacat.com/kedama/v3_daytime/tl/3/2/2/2/2/2/4.jpg'''
         self.map_domain = config['map_domain']  # Overviewer地图地址
         self.map_name = config['map_name']  # 地图名称
+        
         self.image_folder = 'images/{}'.format(self.map_name)  # 图块存哪
         self.data_folder = 'data/{}'.format(self.map_name)  # 更新历史存哪（以后升级数据库？）
         self.log_folder = 'log/{}'.format(self.map_name)  # 日志文件夹
 
-        os.environ['TZ'] = 'Asia/Shanghai'
-        self.today = datetime.today().strftime('%Y%m%d')
+        os.environ['TZ'] = 'Asia/Shanghai' #保留这行 毕竟在Linux里还会用，能让日志日期正确。
+        self.today = datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y%m%d')
         self.logger = self.makeLogger()  # 日志记录器
         self.timestamp = str(int(time.time()))  # 请求图块要用，时区无关
+        self.logger.debug('Today is set to {}'.format(self.today))
 
         '''抓取设置'''
+        self.map_type = self.getMapType() if noFetch == False else config['latest_renderer'] #渲染器种类
+        self.map_rotation = config['map_rotation'] if 'map_rotation' in config else 'tl'
         self.max_threads = config['max_crawl_threads']  # 最大抓图线程数
         # 缩放级别总数
         self.total_depth = config['last_total_depth'] if noFetch == True else self.fetchTotalDepth(
@@ -94,6 +112,42 @@ class crawler():
         self.target_depth = config['target_depth']
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
         self.crawl_zones = ast.literal_eval(config['crawl_zones'])
+
+    def getMapType(self):
+        """确定地图种类
+        
+        探测地图站点中，与特定渲染器相关的js文件（名），从而得知它们用了什么渲染器。
+        https://map.example.com/kedama/static/js/mapcrafterui.js
+        https://ob-mc.net/build/overviewer.js
+
+        Input: none 
+        Return: str: 'Overviewer' or 'Mapcrafter' "
+        
+        """
+        renderer_names = {'Mapcrafter' : 'static/js/mapcrafterui.js', 'Overviewer' : 'overviewerConfig.js'}
+        errors = 0
+        
+        for renderer_name in renderer_names:
+            URL = '{}/{}'.format(self.map_domain, renderer_names[renderer_name])
+            print(URL)
+            try:
+                r = requests.head(URL, timeout=5)
+                if r.status_code == 404:
+                    self.logger.debug('The renderer is not {}'.format(renderer_name))
+                elif r.status_code == 200:
+                    self.logger.info('The renderer is {}.'.format(renderer_name))
+                    return renderer_name
+                else:#异常处理？
+                    raise wannengError(r.status_code)
+            except Exception as e:
+                self.logger.error('Err {} : {}'.format(errors, e))
+                errors += 1
+                if errors >= 5:
+                    raise e
+
+        #If the code reaches here, no renderer is found, raise an exception.
+        raise wannengError("No known renderer found.")
+        
 
     def makeLogger(self):
         """申请并配置抓取器所用到的日志记录器
@@ -221,7 +275,7 @@ class crawler():
     def fetchTotalDepth(self):
         """逐层爬取图块，探测给定的Overviewer地图一共多少层
 
-        按照它们生成地图的规则，硬编码取最靠近地图坐标原点右上方的图块，例如 /1 /1/2 /1/2/2 ……
+        按照它们生成地图的规则，硬编码取最靠近地图坐标原点右上方的图块，例如 /1 /1/2 /1/2/2 ……(Overviewer版本)
         该函数返回crawler类初始化所需的参数，若发生异常则脚本文件应当退出，而不能向下执行。
 
         Args: None
@@ -229,26 +283,24 @@ class crawler():
         Returns:
             depth (int): The total zoom-levels for the given overviewer map."""
 
-        self.logger.info(
-            '------')
-        self.logger.info(
-            'Working on {} to figure out its zoom levels'.format(self.map_name))
-        depth = 0
+        errors = 0            
+        configPaths = {'Overviewer' : 'overviewerConfig.js', 'Mapcrafter' : 'config.js'}
         path = '/1'
-        errors = 0
+        depth = 0
         while True:  # do-while 循环结构的一种改写
-
-            URL = '{}/{}{}.jpg?c={}'.format(self.map_domain,
-                                            self.map_name, path, self.timestamp)
+            
+            URL = {'Overviewer' : '{}/{}{}.jpg?c={}'.format(self.map_domain,self.map_name, path, self.timestamp),
+                   'Mapcrafter' : '{}/{}/{}{}.jpg'  .format(self.map_domain,self.map_name, self.map_rotation, path)}
 
             try:
                 print('.', end='', flush=True)  # 只输出，不换行，边爬边输出。
-                r = requests.head(URL, timeout=5)
+                r = requests.head(URL[self.map_type], timeout=5)
                 if r.status_code == 404:
                     break
                 elif r.status_code == 200:
                     depth += 1
-                    path = path+'/2'
+                    direction_num = {'Overviewer' : '/2', 'Mapcrafter' : '/4'}
+                    path = path+direction_num[self.map_type]
                     errors = 0
                 else:
                     raise wannengError(r.status_code)
