@@ -540,10 +540,13 @@ def main():
         with open('config.json', 'r+') as f:
             configs = json.load(f)
             for map_name in configs.keys():
-                cr = crawler(configs[map_name])
-                cr.runsDaily()
-                if configs[map_name]['last_total_depth'] != cr.total_depth:
-                    configs[map_name]['last_total_depth'] = cr.total_depth
+                if configs[map_name]['enable_crawl'] == True:
+                    cr = crawler(configs[map_name])
+                    cr.runsDaily()
+                    if configs[map_name]['last_total_depth'] != cr.total_depth:
+                        configs[map_name]['last_total_depth'] = cr.total_depth
+                else: 
+                    print("skipping map {}".format(map_name))
             f.seek(0)
             json.dump(configs, f, indent=2, sort_keys=True)
             f.truncate()
