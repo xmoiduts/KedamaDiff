@@ -91,9 +91,11 @@ class crawler():
         self.map_domain = config['map_domain']  # Overviewer地图地址
         self.map_name = config['map_name']  # 地图名称
         
-        self.image_folder = 'images/{}'.format(self.map_name)  # 图块存哪
-        self.data_folder = 'data/{}'.format(self.map_name)  # 更新历史存哪（以后升级数据库？）
-        self.log_folder = 'log/{}'.format(self.map_name)  # 日志文件夹
+        self.map_savename = self.map_name if 'map_savename' not in config else config['map_savename']
+        
+        self.image_folder = 'images/{}'.format(self.map_savename)  # 图块存哪
+        self.data_folder = 'data/{}'.format(self.map_savename)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder = 'log/{}'.format(self.map_savename)  # 日志文件夹
 
         os.environ['TZ'] = 'Asia/Shanghai' #保留这行 毕竟在Linux里还会用，能让日志日期正确。
         self.today = datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y%m%d')
@@ -159,7 +161,7 @@ class crawler():
         Args: None
 
         Returns: instance of `logging`"""
-        logger = logging.getLogger(self.map_name)
+        logger = logging.getLogger(self.map_savename)
         logger.setLevel(logging.DEBUG)
         log_path = '{}/{}.log'.format(self.log_folder, self.today)  # 文件名
         if not os.path.exists(self.log_folder):  # 初次运行，创建log文件夹
@@ -473,6 +475,7 @@ class crawler():
             while True:
                 try:
                     r = requests.head(URL, timeout=5)
+                    visitpath_status = 'none'
                     # 404--图块不存在
                     if r.status_code == 404:
                         statistics.plus('404')
@@ -482,18 +485,24 @@ class crawler():
                         XY = self.path2xy(path, self.total_depth)
                         file_name = '{}_{}_{}.jpg'.format(
                             self.target_depth, XY[0], XY[1])
+                        visitpath_status = 'filename set'
                         # 库里无该图--Add
                         if file_name not in update_history:
+                            visitpath_status = 'To add img'
                             statistics.plus('Added')
                             ret_msg = addNewImg(path, URL, file_name)
                             latest_ETag[file_name] = {'ETag' : r.headers['ETag']}
+                            visitpath_status = 'img added'
                         # 库里有该图片
                         else:
                             # ETag不一致--丢给下一级处理
+                            
                             if r.headers['ETag'] != latest_ETag[file_name]['ETag']:
+                                visitpath_status = 'ETag inconsistent'
                                 ret_msg = processBySHA1(URL, r, file_name)
                             # ETag一致--只出个log
                             else:
+                                visitpath_status = 'ETag consistent'
                                 statistics.plus('Ignore')
                                 ret_msg = 'Ign\t{}'.format(file_name)
                         latest_ETag[file_name]['ETag'] = r.headers['ETag']
@@ -504,6 +513,7 @@ class crawler():
                 except Exception as e:
                     self.logger.error(
                         'No.{} for\t{}\t{}'.format(tryed_time, path, e))
+                    self.logger.error(visitpath_status)
                     tryed_time += 1
                     if tryed_time >= 5:
                         statistics.plus('Fail')
@@ -541,7 +551,7 @@ def main():
             configs = json.load(f)
             for map_name in configs.keys():
                 if configs[map_name]['enable_crawl'] == True:
-                    cr = crawler(configs[map_name])
+                    cr = crawler(configs[map_name], noFetch=True)
                     cr.runsDaily()
                     if configs[map_name]['last_total_depth'] != cr.total_depth:
                         configs[map_name]['last_total_depth'] = cr.total_depth

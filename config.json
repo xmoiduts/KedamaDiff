@@ -1,24 +1,26 @@
 {
   "v1_daytime": {
-    "crawl_zones": "[((0, -8), 56, 29)]",
-    "enable_crawl": false,
-    "last_total_depth": 9,
+    "crawl_zones": "[((0, -8), 80, 40)]",
+    "enable_crawl": true,
+    "last_total_depth": 10,
     "latest_renderer": "Mapcrafter",
     "map_domain": "https://map.nyaacat.com/kedama",
-    "map_name": "v1_daytime",
+    "map_name": "v1",
     "map_rotation": "tl",
-    "max_crawl_threads": 6,
+    "map_savename": "v1_daytime",
+    "max_crawl_threads": 16,
     "target_depth": -3
   },
   "v2_daytime": {
-    "crawl_zones": "[((0, -8), 56, 29)]",
-    "enable_crawl": false,
-    "last_total_depth": 12,
+    "crawl_zones": "[((0, -8), 60, 40)]",
+    "enable_crawl": true,
+    "last_total_depth": 13,
     "latest_renderer": "Mapcrafter",
     "map_domain": "https://map.nyaacat.com/kedama",
-    "map_name": "v2_daytime",
+    "map_name": "v2",
     "map_rotation": "tl",
-    "max_crawl_threads": 6,
+    "map_savename": "v2_daytime",
+    "max_crawl_threads": 16,
     "target_depth": -3
   },
   "v4_daytime": {
