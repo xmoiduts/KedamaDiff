@@ -1,7 +1,11 @@
 images/*
 logs/*
 log/*
-.vscode
+.vscode*
 __pycache__
 *.pyc
-.vscode/settings.json
+
+config.json
+config_bak.json
+config.json
+config.json
