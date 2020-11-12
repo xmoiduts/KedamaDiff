@@ -497,7 +497,11 @@ class crawler():
                         else:
                             # ETag不一致--丢给下一级处理
                             
-                            if r.headers['ETag'] != latest_ETag[file_name]['ETag']:
+                            if r.headers['ETag'] != latest_ETag[file_name]['ETag']: 
+                                # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
+                                # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
+                                # 建立后图块就一直没更新了。
+                                # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
                                 visitpath_status = 'ETag inconsistent'
                                 ret_msg = processBySHA1(URL, r, file_name)
                             # ETag一致--只出个log
