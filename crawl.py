@@ -496,19 +496,25 @@ class crawler():
                         # 库里有该图片
                         else:
                             # ETag不一致--丢给下一级处理
-                            
-                            if r.headers['ETag'] != latest_ETag[file_name]['ETag']: 
-                                # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
-                                # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
-                                # 建立后图块就一直没更新了。
-                                # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
-                                visitpath_status = 'ETag inconsistent'
-                                ret_msg = processBySHA1(URL, r, file_name)
-                            # ETag一致--只出个log
-                            else:
-                                visitpath_status = 'ETag consistent'
-                                statistics.plus('Ignore')
-                                ret_msg = 'Ign\t{}'.format(file_name)
+                            try:
+                                if r.headers['ETag'] != latest_ETag[file_name]['ETag']: 
+                                    # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
+                                    # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
+                                    # 建立后图块就一直没更新了。
+                                    # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
+                                    visitpath_status = 'ETag inconsistent'
+                                    ret_msg = processBySHA1(URL, r, file_name)
+                                # ETag一致--只出个log
+                                else:
+                                    visitpath_status = 'ETag consistent'
+                                    statistics.plus('Ignore')
+                                    ret_msg = 'Ign\t{}'.format(file_name)
+                            except KeyError: 
+                                # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
+                                # 在这catch掉异常，后面一行代码好添加正确的etag。
+                                self.logger.error('{} don\'t show up in latest_ETag but shows in '.format(path))
+                                latest_ETag[file_name] = {'ETag' : update_history[file_name][-1]['ETag']}
+                                self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
                         latest_ETag[file_name]['ETag'] = r.headers['ETag']
                     return ret_msg
                 except (KeyboardInterrupt) as e:
