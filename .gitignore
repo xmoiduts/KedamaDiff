@@ -2,10 +2,9 @@ images/*
 logs/*
 log/*
 .vscode*
-__pycache__
+__pycache__/*
 *.pyc
 
 config.json
 config_bak.json
-config.json
-config.json
+
