@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import ast
 import concurrent.futures
 import hashlib
@@ -243,8 +245,8 @@ class crawler():
         path = ''  # 返回值的初值
         while (val_X != X) and (val_Y != Y):  # 未迭代到期望坐标点：依次计算横纵坐标下一层是哪块
             p -= 1
-            #01|11  0|1
-            #00|10  2|3
+            #01|11  |----\  0|1
+            #00|10  |----/  2|3
             tmp_X = 0 if val_X > X else 1
             val_X += (2 * tmp_X - 1) * (2 ** p)
             tmp_Y = 0 if val_Y > Y else 1
@@ -473,9 +475,10 @@ class crawler():
                                             self.map_name, path, self.timestamp)
             tryed_time = 0
             while True:
+                visitpath_status = 'none'
                 try:
                     r = requests.head(URL, timeout=5)
-                    visitpath_status = 'none'
+                    
                     # 404--图块不存在
                     if r.status_code == 404:
                         statistics.plus('404')
@@ -561,7 +564,7 @@ def main():
             configs = json.load(f)
             for map_name in configs.keys():
                 if configs[map_name]['enable_crawl'] == True:
-                    cr = crawler(configs[map_name], noFetch=True)
+                    cr = crawler(configs[map_name], noFetch=False)
                     cr.runsDaily()
                     if configs[map_name]['last_total_depth'] != cr.total_depth:
                         configs[map_name]['last_total_depth'] = cr.total_depth

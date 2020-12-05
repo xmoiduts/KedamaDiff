@@ -79,6 +79,13 @@ def main():
     elif test_number == 115:
         jr2 = joiner2.joiner(mode = 'show')
         jr2.joinerjob('v2_daytime',((0, -8), 56, 29),'20181010')
+    elif test_number == 116:
+        jr2 = joiner2.joiner(mode = 'show')
+        for i in range(8, 29):
+            datestr = '202011{:02d}'.format(i)
+            jr2.joinerjob('v4',((32, -16), 4, 2), datestr)
+
+            # 鸟笼： ((88,40),5,4)
 
 if __name__ == '__main__':
     main()
