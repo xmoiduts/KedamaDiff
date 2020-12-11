@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import ast
 import concurrent.futures
 import hashlib
@@ -93,9 +95,9 @@ class crawler():
         
         self.map_savename = self.map_name if 'map_savename' not in config else config['map_savename']
         
-        self.image_folder = 'images/{}'.format(self.map_savename)  # 图块存哪
-        self.data_folder = 'data/{}'.format(self.map_savename)  # 更新历史存哪（以后升级数据库？）
-        self.log_folder = 'log/{}'.format(self.map_savename)  # 日志文件夹
+        self.image_folder = '../data-production/images/{}'.format(self.map_savename)  # 图块存哪
+        self.data_folder = '../data-production/data/{}'.format(self.map_savename)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder = '../data-production/log/{}'.format(self.map_savename)  # 日志文件夹
 
         os.environ['TZ'] = 'Asia/Shanghai' #保留这行 毕竟在Linux里还会用，能让日志日期正确。
         self.today = datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y%m%d')
@@ -264,8 +266,8 @@ class crawler():
         path = ''  # 返回值的初值
         while (val_X != X) and (val_Y != Y):  # 未迭代到期望坐标点：依次计算横纵坐标下一层是哪块
             p -= 1
-            #01|11  0|1
-            #00|10  2|3
+            #01|11  |----\  0|1
+            #00|10  |----/  2|3
             tmp_X = 0 if val_X > X else 1
             val_X += (2 * tmp_X - 1) * (2 ** p)
             tmp_Y = 0 if val_Y > Y else 1
@@ -335,43 +337,6 @@ class crawler():
         print()
         self.logger.info("Total zoom depth: {}".format(depth))
         return depth
-
-    def changeImgName(self):
-        '''将上一代path命名的文件名和更新记录转换为‘缩放级别_横坐标_纵坐标.jpg’，只用来批量重命名老版本脚本下载的图片
-        
-        函数已废弃'''
-        #先改图片名，再改历史记录
-        prevwd = os.getcwd()
-        os.chdir(self.image_folder)
-        for dir in os.listdir():
-            os.chdir(dir)
-            time.sleep(3)
-            for filename in os.listdir():
-                path = filename.split('.')[0].replace('_', '/')
-                XY = self.path2xy(path, 11)
-                new_file_name = str(self.target_depth) + \
-                    '_'+str(XY[0])+'_'+str(XY[1])+'.jpg'
-                os.rename(filename, new_file_name)
-                print(filename, '-->', new_file_name)
-            os.chdir('..')
-        os.chdir(prevwd)
-        print('changing back to', os.getcwd())
-
-    def changeJsonKey(self):
-        '''升级 _更新历史_文件
-        
-        该函数已废弃'''
-        with open(self.data_folder+'/'+'update_history.json', 'r') as f:
-            log_buffer = json.load(f)
-            new_log_buffer = {}
-            for origin_key in log_buffer.keys():
-                path = origin_key.split('.')[0].replace('_', '/')
-                XY = self.path2xy(path, 11)
-                new_key = str(self.target_depth)+'_' + \
-                    str(XY[0])+'_'+str(XY[1])+'.jpg'
-                new_log_buffer[new_key] = log_buffer[origin_key]
-            with open(self.data_folder+'/'+'update_history.json', 'w') as f:  # 写回 图块更新史文件
-                json.dump(new_log_buffer, f, indent=2)
 
     def getImgdir(self, dir):
         """返回保存该地图今日更新了的图块的文件夹地址
@@ -494,9 +459,10 @@ class crawler():
                                             self.map_name, path, self.timestamp)
             tryed_time = 0
             while True:
+                visitpath_status = 'none'
                 try:
                     r = requests.head(URL, timeout=5)
-                    visitpath_status = 'none'
+                    
                     # 404--图块不存在
                     if r.status_code == 404:
                         statistics.plus('404')
@@ -582,7 +548,7 @@ def main():
             configs = json.load(f)
             for map_name in configs.keys():
                 if configs[map_name]['enable_crawl'] == True:
-                    cr = crawler(configs[map_name], noFetch=True)
+                    cr = crawler(configs[map_name], noFetch=False)
                     cr.runsDaily()
                     if configs[map_name]['last_total_depth'] != cr.total_depth:
                         configs[map_name]['last_total_depth'] = cr.total_depth
@@ -593,7 +559,7 @@ def main():
             f.truncate()
     except Exception as e:
         print(e)        
-        with open('log/errors.txt','a+') as f:
+        with open('../data-production/log/errors.txt','a+') as f:
             print(str(e),file = f)
         bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
         bot.send_message(176562893,'Something went wrong, see logs/errors.txt for detail')

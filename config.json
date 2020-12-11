@@ -9,6 +9,7 @@
     "map_rotation": "tl",
     "map_savename": "v1_daytime",
     "max_crawl_threads": 16,
+    "note": "[((0, -8), 80, 40)]",
     "target_depth": -3
   },
   "v2_daytime": {
