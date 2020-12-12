@@ -8,3 +8,6 @@ __pycache__/*
 config.json
 config_bak.json
 
+configs/config.py
+configs/crawl_list.py
+config_hide.json

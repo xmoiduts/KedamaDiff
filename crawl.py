@@ -13,6 +13,8 @@ import pytz
 from datetime import datetime
 #from functools import reduce
 from telegram import Bot
+from configs.config import CrawlerConfig as CrConf
+from configs.crawl_list import CrawlList as map_list
 
 import requests
 import urllib3
@@ -90,32 +92,32 @@ class crawler():
         '''文件/路径设置'''
         '''一个正确的链接,overviewer版 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
         '''mapcrafter版： https://map.nyaacat.com/kedama/v3_daytime/tl/3/2/2/2/2/2/4.jpg'''
-        self.map_domain = config['map_domain']  # Overviewer地图地址
-        self.map_name = config['map_name']  # 地图名称
+        self.map_domain = config.map_domain  # Overviewer地图地址
+        self.map_name = config.map_name  # 地图名称
         
-        self.map_savename = self.map_name if 'map_savename' not in config else config['map_savename']
+        self.map_savename = self.map_name if 'map_savename' not in config else config.map_savename
         
-        self.image_folder = '../data-production/images/{}'.format(self.map_savename)  # 图块存哪
-        self.data_folder = '../data-production/data/{}'.format(self.map_savename)  # 更新历史存哪（以后升级数据库？）
-        self.log_folder = '../data-production/log/{}'.format(self.map_savename)  # 日志文件夹
+        self.image_folder = '{}/images/{}'.format(CrConf.data_folders, self.map_savename)  # 图块存哪
+        self.data_folder  = '{}/data/{}'  .format(CrConf.data_folders, self.map_savename)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder  =  '{}/log/{}'   .format(CrConf.data_folders, self.map_savename)  # 日志文件夹
 
-        os.environ['TZ'] = 'Asia/Shanghai' #保留这行 毕竟在Linux里还会用，能让日志日期正确。
-        self.today = datetime.now(pytz.timezone('Asia/Shanghai')).strftime('%Y%m%d')
+        os.environ['TZ'] = CrConf.timezone #保留这行 毕竟在Linux里还会用，能让日志日期正确。
+        self.today = datetime.now(pytz.timezone(CrConf.timezone)).strftime('%Y%m%d')
         self.logger = self.makeLogger()  # 日志记录器
         self.timestamp = str(int(time.time()))  # 请求图块要用，时区无关
         self.logger.debug('Today is set to {}'.format(self.today))
 
         '''抓取设置'''
-        self.map_type = self.getMapType() if noFetch == False else config['latest_renderer'] #渲染器种类
-        self.map_rotation = config['map_rotation'] if 'map_rotation' in config else 'tl'
-        self.max_threads = config['max_crawl_threads']  # 最大抓图线程数
+        self.map_type = self.getMapType() if noFetch == False else config.latest_renderer #渲染器种类 # TODO: 最新渲染器种类丢到data目录去
+        self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
+        self.max_threads = config.max_crawl_threads  # 最大抓图线程数
         # 缩放级别总数
-        self.total_depth = config['last_total_depth'] if noFetch == True else self.fetchTotalDepth(
+        self.total_depth = config.last_total_depth if noFetch == True else self.fetchTotalDepth(
         )
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.target_depth = config['target_depth']
+        self.target_depth = config.target_depth
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
-        self.crawl_zones = ast.literal_eval(config['crawl_zones'])
+        self.crawl_zones = ast.literal_eval(config.crawl_zones)
 
     def getMapType(self):
         """确定地图种类
@@ -135,7 +137,7 @@ class crawler():
             URL = '{}/{}'.format(self.map_domain, renderer_names[renderer_name])
             print(URL)
             try:
-                r = requests.head(URL, timeout=5)
+                r = requests.head(URL, timeout = CrConf.crawl_request_timeout)
                 if r.status_code == 404:
                     self.logger.debug('The renderer is not {}'.format(renderer_name))
                 elif r.status_code == 200:
@@ -146,7 +148,7 @@ class crawler():
             except Exception as e:
                 self.logger.error('Err {} : {}'.format(errors, e))
                 errors += 1
-                if errors >= 5:
+                if errors >= CrConf.crawl_request_retries:
                     raise e
 
         #If the code reaches here, no renderer is found, raise an exception.
@@ -344,7 +346,7 @@ class crawler():
         第一次运行创建路径和数据文件，全量下/存图片，
         后续每次只下载ETag变动的图片并保存其中SHA1变动的图片(约占前者的1/3?)"""
 
-        bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
+        bot = Bot(token = CrConf.telegram_bot_key )
 
         statistics = counter() # 统计抓图状态
         update_history = {}  # 更新历史
@@ -517,31 +519,29 @@ class crawler():
             json.dump(latest_ETag,f,indent=2, sort_keys=True)
             self.logger.debug('latest_ETag dumped at {}'.format(time.time()))
         try:
-            bot.send_message(176562893,'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(statistics)))
+            bot.send_message(CrConf.telegram_msg_recipient, 'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(statistics)))
         except Exception :
             self.logger.warning('Telegram bot failed sending {} statistics!'.format(self.map_name))
 
 def main():
     try:
-        with open('config.json', 'r+') as f:
-            configs = json.load(f)
-            for map_name in configs.keys():
-                if configs[map_name]['enable_crawl'] == True:
-                    cr = crawler(configs[map_name], noFetch=False)
-                    cr.runsDaily()
-                    if configs[map_name]['last_total_depth'] != cr.total_depth:
-                        configs[map_name]['last_total_depth'] = cr.total_depth
-                else: 
-                    print("skipping map {}".format(map_name))
-            f.seek(0)
-            json.dump(configs, f, indent=2, sort_keys=True)
-            f.truncate()
+        for map_name, map_conf in map_list.items():
+            if map_conf.enable_crawl == True:
+                cr = crawler(map_conf, noFetch=False)
+                cr.runsDaily()
+                if map_conf.last_total_depth != cr.total_depth:
+                    map_conf.last_total_depth = cr.total_depth
+            else: 
+                print("skipping map {}".format(map_name))
+        #f.seek(0)
+        #json.dump(configs, f, indent=2, sort_keys=True)
+        #f.truncate()
     except Exception as e:
         print(e)        
-        with open('../data-production/log/errors.txt','a+') as f:
+        with open('{}/log/errors.txt'.format(CrConf.data_folders),'a+') as f:
             print(str(e),file = f)
-        bot = Bot(token = "508665684:AAH_vFcSOrXiIuGnVBc-xi0A6kPl1h7WFZc" )
-        bot.send_message(176562893,'Something went wrong, see logs/errors.txt for detail')
+        bot = Bot(token = CrConf.telegram_bot_key )
+        bot.send_message(CrConf.telegram_msg_recipient,'Something went wrong, see logs/errors.txt for detail')
 
 
 
