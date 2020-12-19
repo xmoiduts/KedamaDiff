@@ -18,6 +18,8 @@ from configs.crawl_list import CrawlList as map_list
 
 import requests
 import urllib3
+import asyncio
+import aiohttp
 
 try:
     import win_unicode_console  # pip安装
@@ -111,7 +113,7 @@ class crawler():
         '''抓取设置'''
         self.map_type = self.getMapType() if noFetch == False else config.latest_renderer #渲染器种类 # TODO: 最新渲染器种类丢到data目录去
         self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
-        self.max_threads = config.max_crawl_threads  # 最大抓图线程数
+        self.max_threads = config.max_crawl_workers  # 最大抓图线程数
         # 缩放级别总数
         self.total_depth = config.last_total_depth if noFetch == True else self.fetchTotalDepth(
         )
@@ -185,7 +187,7 @@ class crawler():
         logger.addHandler(fh), logger.addHandler(ch)
         return logger
 
-    def downloadImage(self, URL):
+    async def downloadImage(self, sess, URL):
         """下载给定URL的文件并返回
 
         别瞎改，改了(1)次又改回来了
@@ -203,10 +205,17 @@ class crawler():
             
             Let the caller function handle these errors."""
 
+        '''
         r = requests.get(URL, stream='True', timeout=5)
         if r.status_code == 200:
             img = r.raw.read()
             return {'headers': r.headers, 'image': img}
+        '''
+        async with sess.get(URL, timeout = 5) as response:
+            if response.status == 200:
+                img = await response.read()
+            return {'headers': response.headers, 'image': img}
+
 
     def makePath(self, zoneLists, depth):
         """生成给定观察区域的图块路径。
@@ -341,7 +350,7 @@ class crawler():
 
     '''，，一轮完成而不是先head再get'''      
 
-    def addNewImg(self, path, URL, file_name):
+    async def addNewImg(self, sess, path, URL, file_name):
         """向文件系统和更新历史记录中添加新图片
         
         Args: 
@@ -351,7 +360,7 @@ class crawler():
             ret_msg (str): The log message of the very image."""
         # 把 save_in 传入，把update_history 提到self里，就可将此方法提出上一层方法去。
         # 为适应数据库所做的规划：将update_history的赋值行为改成数据库insert操作但不commit
-        response = self.downloadImage(URL)
+        response = await self.downloadImage(sess, URL)
         self.update_history[file_name] = (
             [{'Save_in': self.save_in.next(), 'ETag': response['headers']['ETag']}])
         with open(self.save_in.next()+file_name, 'wb') as f:
@@ -360,7 +369,7 @@ class crawler():
         ret_msg = 'Add\t{}.jpg as {}'.format(path, file_name)
         return ret_msg 
 
-    def processBySHA1(self, URL, response, file_name):
+    async def processBySHA1(self, sess, URL, response, file_name):
         """下载图块并根据摘要来处理文件
         
         适用于站点最新图片和本地保存的最新图片ETag不同的时候
@@ -377,7 +386,8 @@ class crawler():
         #   面向数据库和oss做一个文件访问方法，能读/写/获取路径?/创建尚不存在的目录
         
 
-        DL_img = self.downloadImage(URL)['image']
+        DL_img = await self.downloadImage(sess, URL)
+        DL_img = DL_img['image']
         In_Stock_Latest = self.update_history[file_name][-1]['Save_in'] + file_name
         with open(In_Stock_Latest, 'rb') as Prev_img:
             # SHA1不一致，喻示图片发生了实质性修改
@@ -385,7 +395,7 @@ class crawler():
                 # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
                 if self.update_history[file_name][-1]['Save_in'] == self.save_in.next():
                     del self.update_history[file_name][-1]
-                    self.statistics.plus('Replaced')
+                    self.statistics.plus('Replace')
                     ret_msg = 'Rep\t{}'.format(file_name)
                 else:
                     self.statistics.plus('Update')
@@ -401,7 +411,7 @@ class crawler():
                 ret_msg = 'nMOD\t{}'.format(file_name)
             return ret_msg
 
-    def visitPath(self, path):  #
+    async def visitPath(self, sess, path):  
         """抓取单张图片并对响应进行处理的工人
         
         对每张图片进行最多5次下载尝试，如果还是下不来就放弃这张图片
@@ -422,61 +432,78 @@ class crawler():
         while True:
             visitpath_status = 'none'
             try:
-                r = requests.head(URL, timeout=5)
-                
-                # 404--图块不存在
-                if r.status_code == 404:
-                    self.statistics.plus('404')
-                    ret_msg = '404\t{}'.format(path)
-                # 200--OK
-                elif r.status_code == 200:
-                    XY = self.path2xy(path, self.total_depth)
-                    file_name = '{}_{}_{}.jpg'.format(
-                        self.target_depth, XY[0], XY[1])
-                    visitpath_status = 'filename set'
-                    # 库里无该图--Add
-                    if file_name not in self.update_history:
-                        visitpath_status = 'To add img'
-                        self.statistics.plus('Added')
-                        ret_msg = self.addNewImg(path, URL, file_name)
-                        self.latest_ETag[file_name] = {'ETag' : r.headers['ETag']}
-                        visitpath_status = 'img added'
-                    # 库里有该图片
-                    else:
-                        # ETag不一致--丢给下一级处理
-                        try:
-                            if r.headers['ETag'] != self.latest_ETag[file_name]['ETag']: 
-                                # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
-                                # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
-                                # 建立后图块就一直没更新了。
-                                # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
-                                visitpath_status = 'ETag inconsistent'
-                                ret_msg = self.processBySHA1(URL, r, file_name)
-                            # ETag一致--只出个log
-                            else:
-                                visitpath_status = 'ETag consistent'
-                                self.statistics.plus('Ignore')
-                                ret_msg = 'Ign\t{}'.format(file_name)
-                        except KeyError: 
-                            # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
-                            # 在这catch掉异常，后面一行代码好添加正确的etag。
-                            self.logger.error('{} don\'t show up in latest_ETag but shows in '.format(path))
-                            self.latest_ETag[file_name] = {'ETag' : self.update_history[file_name][-1]['ETag']}
-                            self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
-                    self.latest_ETag[file_name]['ETag'] = r.headers['ETag']
+                ret_msg = 'none..'
+                async with self.crawlJob_semaphore:
+                    async with sess.head(URL, timeout = 5) as response:
+                        r = response
+                    #r = requests.head(URL, timeout=5)
+                    
+                    # 404--图块不存在
+                    if r.status == 404:
+                        self.statistics.plus('404')
+                        ret_msg = '404\t{}'.format(path)
+                    # 200--OK
+                    elif r.status == 200:
+                        XY = self.path2xy(path, self.total_depth)
+                        file_name = '{}_{}_{}.jpg'.format(
+                            self.target_depth, XY[0], XY[1])
+                        visitpath_status = 'filename set'
+                        # 库里无该图--Add
+                        if file_name not in self.update_history:
+                            visitpath_status = 'To add img'
+                            ret_msg = await self.addNewImg(sess, path, URL, file_name)
+                            self.latest_ETag[file_name] = {'ETag' : r.headers['ETag']}
+                            self.statistics.plus('Added')
+                            visitpath_status = 'img added'
+                        # 库里有该图片
+                        else:
+                            # ETag不一致--丢给下一级处理
+                            try:
+                                if r.headers['ETag'] != self.latest_ETag[file_name]['ETag']: 
+                                    # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
+                                    # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
+                                    # 建立后图块就一直没更新了。
+                                    # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
+                                    visitpath_status = 'ETag inconsistent'
+                                    ret_msg = await self.processBySHA1(sess, URL, r, file_name)
+                                # ETag一致--只出个log
+                                else:
+                                    visitpath_status = 'ETag consistent'
+                                    self.statistics.plus('Ignore')
+                                    ret_msg = 'Ign\t{}'.format(file_name)
+                            except KeyError as e: 
+                                # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
+                                # 在这catch掉异常，后面一行代码好添加正确的etag。
+                                self.logger.error(e)
+                                self.logger.error('{} don\'t show up in latest_ETag but shows in '.format(path))
+                                self.latest_ETag[file_name] = {'ETag' : self.update_history[file_name][-1]['ETag']}
+                                self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
+                        self.latest_ETag[file_name]['ETag'] = r.headers['ETag']
+                self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                 return ret_msg
             except (KeyboardInterrupt) as e:
                 raise e
             # 网络遇到问题，重试最多5次
+            # BUG: 异常处理顺序导致部分爬取状态（例如：网络异常爬取报错报错）下的ctrl+c无效。
             except Exception as e:
+                #if e is keyboardexception: raise;
                 self.logger.error(
                     'No.{} for\t{}\t{}'.format(tryed_time, path, e))
-                self.logger.error(visitpath_status)
+                self.logger.error('at: {}'.format(visitpath_status))
                 tryed_time += 1
                 if tryed_time >= 5:
                     self.statistics.plus('Fail')
                     ret_msg = 'Fail\t{}'.format(path)
+                    self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                     return ret_msg
+            # using `finally` here will break the 5-time-tolerant `while`-loop.
+
+    async def visitPaths(self, paths):
+        self.crawlJob_semaphore = asyncio.Semaphore(self.max_threads) # TODO: rename 'threads' as 'workers'
+        async with aiohttp.ClientSession(read_bufsize = 2 ** 18) as sess:
+            await asyncio.gather(*[self.visitPath(sess, path) for path in paths])
+            
+
 
     def runsDaily(self):
         """每日运行的抓图存图函数，以单个overviewer地图为范围，抓取并更新库中的图片。
@@ -513,6 +540,7 @@ class crawler():
 
         # 维护一个抓图线程池
         # Todo: 复用抓图网络连接，减少全程发出的连接数
+        '''
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:
             try:
                 for msg in executor.map(self.visitPath, to_crawl):
@@ -522,6 +550,18 @@ class crawler():
                 self.logger.warn('User pressed ctrl+c.')
                 self.logger.warn('Will exit when other threads return.')
                 return 0
+        '''
+
+        
+        
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(self.visitPaths(to_crawl))
+        except KeyboardInterrupt:
+            self.logger.warn('User pressed ctrl+c.')
+            self.logger.warn('Will exit when other threads return.')
+            return 0
+
 
         # 将今天的抓图情况写回更新历史文件
         self.logger.debug('Start dumping json at {}'.format(time.time()))

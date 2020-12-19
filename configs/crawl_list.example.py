@@ -11,7 +11,7 @@ maps =  {
         "map_name": "v1",
         "map_rotation": "tl",
         "map_savename": "v1_daytime",
-        "max_crawl_threads": 16,
+        "max_crawl_workers": 16,
         "note": "[((0, -8), 80, 40)]",
         "target_depth": -3
     },
@@ -24,7 +24,7 @@ maps =  {
         "map_name": "v2",
         "map_rotation": "tl",
         "map_savename": "v2_daytime",
-        "max_crawl_threads": 16,
+        "max_crawl_workers": 16,
         "target_depth": -3
     },
     "v4_daytime": {
@@ -35,7 +35,7 @@ maps =  {
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v4",
         "map_rotation": "tl",
-        "max_crawl_threads": 24,
+        "max_crawl_workers": 24,
         "note": "[((0, 0), 140, 70)]",
         "target_depth": -3
     }
