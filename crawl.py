@@ -187,7 +187,11 @@ class crawler():
         logger.addHandler(fh), logger.addHandler(ch)
         return logger
 
+<<<<<<< Updated upstream
     async def downloadImage(self, sess, URL):
+=======
+    def downloadImage(self, URL):
+>>>>>>> Stashed changes
         """下载给定URL的文件并返回
 
         别瞎改，改了(1)次又改回来了
