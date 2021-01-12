@@ -20,6 +20,7 @@ import requests
 import urllib3
 import asyncio
 import aiohttp
+import sqlite3
 
 try:
     import win_unicode_console  # pip安装
@@ -81,7 +82,7 @@ class counter():
 
 class crawler():
     # 针对(单张地图,单级缩放)的图块抓取器
-    def __init__(self, config, noFetch=False):
+    def __init__(self, config, noFetch=False): # TODO: config -> map_config
         """
         初始化图片抓取器
 
@@ -121,6 +122,7 @@ class crawler():
         self.target_depth = config.target_depth
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
         self.crawl_zones = ast.literal_eval(config.crawl_zones)
+        self.dry_run = False # In dry-run mode, neither commit DB nor save image file, while logs are permitted.
 
     def getMapType(self):
         """确定地图种类
@@ -187,6 +189,71 @@ class crawler():
         logger.addHandler(fh), logger.addHandler(ch)
         return logger
 
+    def prepareDBConnection(self):
+        # Connects to DB and return its connection,
+        # Create DB file path if not exist
+        # Create DB Tables and headers on DB file creation.
+        try:
+            sqliteConnection = sqlite3.connect(
+                '{}/crawl_records.db'.format(self.data_folder))
+        except sqlite3.OperationalError:
+            self.logger.warning(
+                'DB not found, creating its directory: ')
+            self.logger.warning(
+                '{}/crawl_records.db'.format(self.data_folder))
+            if not os.path.exists(self.data_folder):
+                os.makedirs(self.data_folder)
+                self.logger.info(
+                    'Made directory\t./{}'.format(self.data_folder)
+                    )
+            sqliteConnection = sqlite3.connect(
+                '{}/crawl_records.db'.format(self.data_folder))
+        self.logger.info(
+            'Connected to {}/crawl_records.db'.format(self.data_folder))
+
+        # init tables with headers.
+        cursor = sqliteConnection.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS crawl_records(
+                file_name varchar(100) NOT NULL,
+                crawled_at varchar(8) NOT NULL,
+                map_rotation varchar(2), 
+                ETag varchar(30) NOT NULL, 
+                zoom_level INTEGER NOT NULL,
+                coord_x INTEGER NOT NULL,
+                coord_y INTEGET NOT NULL,
+                stored_at varchar(255),
+                frozen boolean DEFAULT False,
+                deleted boolean DEFAULT False
+	        )'''
+        )
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS map_attributes(
+                id INTEGER PRIMARY KEY NOT NULL,
+                map_name varchar(30),
+                data_path varchar(128),
+                last_total_depth INTEGER,
+                last_update varchar(8)
+            )''' # This table only 1 row, id only == 1
+        )
+
+        return sqliteConnection
+
+    def updateDBDates(self):
+        # update crawl history TODO: move to just before commit
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            INSERT OR REPLACE INTO map_attributes
+                (id, map_name, data_path, last_total_depth, last_update)
+            VALUES (?,?,?,?,?)''',
+            (1, 
+            self.map_name, 
+            CrConf.data_folders,
+            self.total_depth,
+            self.today
+            )
+        )
+
     async def downloadImage(self, sess, URL):
         """下载给定URL的文件并返回
 
@@ -211,7 +278,7 @@ class crawler():
             img = r.raw.read()
             return {'headers': r.headers, 'image': img}
         '''
-        async with sess.get(URL, timeout = 5) as response:
+        async with sess.get(URL, timeout = 5) as response: 
             if response.status == 200:
                 img = await response.read()
             return {'headers': response.headers, 'image': img}
@@ -517,43 +584,19 @@ class crawler():
         self.update_history = {}  # 更新历史
         self.latest_ETag = {} # 每个区块的最新ETag
 
+
         save_in = self.getImgdir(self.image_folder)
         self.save_in = threadsafe_generator(save_in)
 
         # 读取图块更新史，若文件不存在则连带所述目录一同创建。
-        try:
-            with open('{}/update_history.json'.format(self.data_folder), 'r') as f:
-                self.update_history = json.load(f)
-
-            with open('{}/latest_ETag.json'.format(self.data_folder), 'r') as f:
-                self.latest_ETag = json.load(f)
-
-        except FileNotFoundError:
-                if not os.path.exists(self.data_folder):
-                    os.makedirs(self.data_folder)
-                    self.logger.info(
-                        'Made directory\t./{}'.format(self.data_folder))
+        # -> Get a DB object() ?
+        self.sqliteConnection = self.prepareDBConnection()
 
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
 
 
-        # 维护一个抓图线程池
-        # Todo: 复用抓图网络连接，减少全程发出的连接数
-        '''
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_threads) as executor:
-            try:
-                for msg in executor.map(self.visitPath, to_crawl):
-                    self.logger.warn(
-                        msg) if 'Fail' in msg or 'Rep' in msg else self.logger.info(msg)
-            except KeyboardInterrupt:
-                self.logger.warn('User pressed ctrl+c.')
-                self.logger.warn('Will exit when other threads return.')
-                return 0
-        '''
-
-        
-        
+        # 维护一个抓图协程(池?)
         loop = asyncio.get_event_loop()
         try:
             loop.run_until_complete(self.visitPaths(to_crawl))
@@ -561,9 +604,15 @@ class crawler():
             self.logger.warn('User pressed ctrl+c.')
             self.logger.warn('Will exit when other threads return.')
             return 0
+        finally:
+            self.updateDBDates()
+            if not self.dry_run:
+                self.sqliteConnection.commit()
+            self.sqliteConnection.close()
 
 
         # 将今天的抓图情况写回更新历史文件
+        # TODO 若用测试代码读取生产库则要先复制生产库到测试环境。
         self.logger.debug('Start dumping json at {}'.format(time.time()))
         with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
             json.dump(self.update_history, f, indent=2, sort_keys=True)
