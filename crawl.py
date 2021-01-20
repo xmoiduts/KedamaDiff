@@ -240,7 +240,7 @@ class crawler():
         return sqliteConnection
 
     def updateDBDates(self):
-        # update crawl history TODO: move to just before commit
+        # update 'last_update' in DB.map_attributes .
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             INSERT OR REPLACE INTO map_attributes
@@ -253,6 +253,32 @@ class crawler():
             self.today
             )
         )
+
+    def getLatestSavedETag(self, file_name) -> str: 
+        # Return the latest saved ETag from DB;
+        # If the filename has no record then return ''.
+        return self.getLatest('ETag', file_name)
+    
+    def getLatestUpdatePath(self, file_name):
+        # Return path of the latest crawl record from DB
+        # example: 'images/v1_daytime/20180228/' for -3_184_-200.jpg
+        # If filename has no record then return ''.
+        return self.getLatest('stored_at', file_name)
+
+    def getLatest(self, item, file_name):
+        # Return the latest item from DB
+        # If item has no record then return ''.
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            SELECT {}, crawled_at
+            FROM crawl_records
+            WHERE file_name = ?
+            ORDER BY crawled_at DESC
+            LIMIT 1
+        '''.format(item), (file_name,)
+        )
+        retrieved = cursor.fetchone() 
+        return '' if retrieved is None else retrieved[0]
 
     async def downloadImage(self, sess, URL):
         """下载给定URL的文件并返回
@@ -356,6 +382,7 @@ class crawler():
     若受网络等影响未获取到值，则整个脚本退出。'''
 
     def fetchTotalDepth(self):
+        # TODO: migrate to aiohttp?
         """逐层爬取图块，探测给定的Overviewer地图一共多少层
 
         按照它们生成地图的规则，硬编码取最靠近地图坐标原点右上方的图块，例如 /1 /1/2 /1/2/2 ……(Overviewer版本)
@@ -439,7 +466,7 @@ class crawler():
     async def processBySHA1(self, sess, URL, response, file_name):
         """下载图块并根据摘要来处理文件
         
-        适用于站点最新图片和本地保存的最新图片ETag不同的时候
+        适用于新增图片(Add)及站点最新图片和本地保存的最新图片ETag不同的时候(nMod, upd, rep)
         
         Args:
             URL (str) : The url of a specific image.
@@ -448,14 +475,19 @@ class crawler():
         
         Returns:
             ret_msg (str): The log message of the very image."""
+
         #数据库预想：
         #   TODO In_stock_latest 所对应图片的获取方式要变更，
-        #   面向数据库和oss做一个文件访问方法，能读/写/获取路径?/创建尚不存在的目录
+        #   面向数据库和oss做一个文件访问方法，能读/写/获取路径?/创建尚不存在的目录，网络错误则直接raise不用catch
+        #
+        #   processBySha1 方法名改为 selectiveSaveImg()
+        #   新方法：getLatestUpdatePath(), 如filename在DB无记录则返回''。
         
 
         DL_img = await self.downloadImage(sess, URL)
         DL_img = DL_img['image']
         In_Stock_Latest = self.update_history[file_name][-1]['Save_in'] + file_name
+
         with open(In_Stock_Latest, 'rb') as Prev_img:
             # SHA1不一致，喻示图片发生了实质性修改
             if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
@@ -515,6 +547,7 @@ class crawler():
                         file_name = '{}_{}_{}.jpg'.format(
                             self.target_depth, XY[0], XY[1])
                         visitpath_status = 'filename set'
+                        '''
                         # 库里无该图--Add
                         if file_name not in self.update_history:
                             visitpath_status = 'To add img'
@@ -522,29 +555,31 @@ class crawler():
                             self.latest_ETag[file_name] = {'ETag' : r.headers['ETag']}
                             self.statistics.plus('Added')
                             visitpath_status = 'img added'
+                        '''
                         # 库里有该图片
-                        else:
-                            # ETag不一致--丢给下一级处理
-                            try:
-                                if r.headers['ETag'] != self.latest_ETag[file_name]['ETag']: 
-                                    # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
-                                    # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
-                                    # 建立后图块就一直没更新了。
-                                    # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
-                                    visitpath_status = 'ETag inconsistent'
-                                    ret_msg = await self.processBySHA1(sess, URL, r, file_name)
-                                # ETag一致--只出个log
-                                else:
-                                    visitpath_status = 'ETag consistent'
-                                    self.statistics.plus('Ignore')
-                                    ret_msg = 'Ign\t{}'.format(file_name)
-                            except KeyError as e: 
-                                # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
-                                # 在这catch掉异常，后面一行代码好添加正确的etag。
-                                self.logger.error(e)
-                                self.logger.error('{} don\'t show up in latest_ETag but shows in '.format(path))
-                                self.latest_ETag[file_name] = {'ETag' : self.update_history[file_name][-1]['ETag']}
-                                self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
+                        #else:
+                        # ETag不一致--丢给下一级处理
+                        # TODO: self.getLatestSavedETag(file_name) -> str
+                        try:
+                            if r.headers['ETag'] != self.latest_ETag[file_name]['ETag']: 
+                                # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
+                                # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
+                                # 建立后图块就一直没更新了。
+                                # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
+                                visitpath_status = 'ETag inconsistent'
+                                ret_msg = await self.processBySHA1(sess, URL, r, file_name)
+                            # ETag一致--只出个log
+                            else:
+                                visitpath_status = 'ETag consistent'
+                                self.statistics.plus('Ignore')
+                                ret_msg = 'Ign\t{}'.format(file_name)
+                        except KeyError as e: 
+                            # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
+                            # 在这catch掉异常，后面一行代码好添加正确的etag。
+                            self.logger.error(e)
+                            self.logger.error('{} don\'t show up in latest_ETag but shows in '.format(path))
+                            self.latest_ETag[file_name] = {'ETag' : self.update_history[file_name][-1]['ETag']}
+                            self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
                         self.latest_ETag[file_name]['ETag'] = r.headers['ETag']
                 self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                 return ret_msg
