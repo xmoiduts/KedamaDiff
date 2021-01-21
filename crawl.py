@@ -112,10 +112,10 @@ class crawler():
         self.logger.debug('Today is set to {}'.format(self.today))
 
         '''抓取设置'''
-        self.map_type = self.getMapType() if noFetch == False else config.latest_renderer #渲染器种类 # TODO: 最新渲染器种类丢到data目录去
+        self.map_type = self.getMapType() if noFetch == False else config.latest_renderer #渲染器种类 # TODO: 最新渲染器种类丢到数据库去或取消掉
         self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
         self.max_threads = config.max_crawl_workers  # 最大抓图线程数
-        # 缩放级别总数
+        # 缩放级别总数 TODO: 从数据库中取数
         self.total_depth = config.last_total_depth if noFetch == True else self.fetchTotalDepth(
         )
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
@@ -255,30 +255,71 @@ class crawler():
         )
 
     def getLatestSavedETag(self, file_name) -> str: 
-        # Return the latest saved ETag from DB;
+        # Return the latest saved ETag 
+        #    of the given file_name from DB;
         # If the filename has no record then return ''.
-        return self.getLatest('ETag', file_name)
+        retrieved = self.getLatest('ETag', file_name)
+        return '' if retrieved is None else retrieved[0]
     
-    def getLatestUpdatePath(self, file_name):
-        # Return path of the latest crawl record from DB
+    def getLatestUpdatePath(self, file_name) -> str:
+        # Return path of the latest crawl record
+        #    of the given file_name from DB;
         # example: 'images/v1_daytime/20180228/' for -3_184_-200.jpg
         # If filename has no record then return ''.
-        return self.getLatest('stored_at', file_name)
+        retrieved = self.getLatest('stored_at', file_name)
+        return '' if retrieved is None else retrieved[0]
+
+    def getLatestUpdateDate(self, file_name) -> str:
+        # Return the latest update date 
+        #    of the given file_name from DB;
+        # example: '20201112'
+        retrieved = self.getLatest('ETag', file_name) # ETag is not used in this function
+        # ... but essential to make a correct function call.
+        return '' if retrieved is None else retrieved[1]
 
     def getLatest(self, item, file_name):
         # Return the latest item from DB
         # If item has no record then return ''.
+        # TODO: Filter out `deleted = True` records.
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             SELECT {}, crawled_at
             FROM crawl_records
-            WHERE file_name = ?
+            WHERE file_name = ? AND deleted IS "False"
             ORDER BY crawled_at DESC
             LIMIT 1
-        '''.format(item), (file_name,)
+        '''.format(item), (file_name,) 
         )
         retrieved = cursor.fetchone() 
-        return '' if retrieved is None else retrieved[0]
+        return retrieved
+
+    def deactivateCrawlRecord(self, file_name, date):
+        # Soft delete a record in crawl record DB
+        # accroadign to given filename and date.
+        # show warning message if row(s) other than 1 is affected.
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            UPDATE crawl_records
+            SET deleted = "True"
+            WHERE file_name = ?
+                AND crawled_at = ?
+                AND deleted IS "False"
+        ''',(file_name, date) 
+        )
+        if cursor.rowcount != 1:
+            self.logger.warning("Deactivated {} lines on {}, {}".format(cursor.rowcount, file_name, date))
+        else:
+            self.logger.info("Deactivated {} lines on {}, {}".format(cursor.rowcount, file_name, date))
+        return 
+
+    def addCrawlRecord(self, file_name, date, ETag, zoom_level, coord_x, coord_y, path):
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            INSERT INTO crawl_records
+            (file_name, crawled_at, ETag, zoom_level, coord_x, coord_y, stored_at)
+            VALUES (?,?,?,?,?,?,?)''',
+            (file_name, date, ETag, zoom_level, coord_x, coord_y, path) 
+        )
 
     async def downloadImage(self, sess, URL):
         """下载给定URL的文件并返回
@@ -368,7 +409,8 @@ class crawler():
         Args: E.g. : '/0/3/3/3/1/2/1/3' , 15
             path (int) : The overviewer img block path to convert.
                 P.S.: The '/' in the beginning is needed
-            depth (int) : The total zoom-levels for the given overviewer map."""
+            depth (int) : The total zoom-levels for the given overviewer 
+                map (total depth)."""
 
         in_list = map(int, path.split('/')[1:])
         X, Y = (0, 0)
@@ -463,15 +505,17 @@ class crawler():
         ret_msg = 'Add\t{}.jpg as {}'.format(path, file_name)
         return ret_msg 
 
-    async def processBySHA1(self, sess, URL, response, file_name):
+    async def processBySHA1(self, sess, URL, response, file_name, coord):
         """下载图块并根据摘要来处理文件
         
         适用于新增图片(Add)及站点最新图片和本地保存的最新图片ETag不同的时候(nMod, upd, rep)
         
         Args:
+            sess: aiohttp.ClientSession.
             URL (str) : The url of a specific image.
             response : The response of head(url).
             file_name (str): What to save the img as.
+            coord(set(x,y)): x and y coordinate of the image patch.
         
         Returns:
             ret_msg (str): The log message of the very image."""
@@ -482,18 +526,24 @@ class crawler():
         #
         #   processBySha1 方法名改为 selectiveSaveImg()
         #   新方法：getLatestUpdatePath(), 如filename在DB无记录则返回''。
+        #   新方法：addCrawlRecord(), 
+        #       在Rep工况下要将已有的相同(日期，文件名)记录置为无效：
+        #       新方法： deactivateCrawlRecord()
         
 
         DL_img = await self.downloadImage(sess, URL)
         DL_img = DL_img['image']
-        In_Stock_Latest = self.update_history[file_name][-1]['Save_in'] + file_name
+        In_Stock_Latest = self.getLatestUpdatePath(file_name) + file_name
 
         with open(In_Stock_Latest, 'rb') as Prev_img:
-            # SHA1不一致，喻示图片发生了实质性修改
-            if hashlib .sha1(Prev_img .read()) .hexdigest() != hashlib .sha1(DL_img) .hexdigest():
+            # SHA1不一致，喻示图片发生了实质性修改 (Upd, Rep)
+            if hashlib.sha1(Prev_img .read()).hexdigest() != hashlib.sha1(DL_img).hexdigest():
                 # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
-                if self.update_history[file_name][-1]['Save_in'] == self.save_in.next():
+                # 能否用一条逻辑实现“如果要插入的记录已存在则修改库中记录”？
+
+                if self.getLatestUpdateDate(file_name) == self.today:                     
                     del self.update_history[file_name][-1]
+                    # self.deactivateCrawlRecord(file_name, self.today) 
                     self.statistics.plus('Replace')
                     ret_msg = 'Rep\t{}'.format(file_name)
                 else:
@@ -501,6 +551,9 @@ class crawler():
                     ret_msg = 'Upd\t{}'.format(file_name)
                 self.update_history[file_name].append(
                     {'Save_in': self.save_in.next(), 'ETag': response.headers['ETag']})
+                #self.addCrawlRecord(
+                #    file_name, self.today, response.headers['ETag'], 
+                #    self.target_depth, coord[0], coord[1], self.save_in.next())
                 with open(self.save_in.next()+file_name, 'wb') as f:
                         f.write(DL_img)
                         f.close()
@@ -567,7 +620,7 @@ class crawler():
                                 # 建立后图块就一直没更新了。
                                 # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
                                 visitpath_status = 'ETag inconsistent'
-                                ret_msg = await self.processBySHA1(sess, URL, r, file_name)
+                                ret_msg = await self.processBySHA1(sess, URL, r, file_name, XY)
                             # ETag一致--只出个log
                             else:
                                 visitpath_status = 'ETag consistent'
