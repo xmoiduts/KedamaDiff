@@ -189,6 +189,8 @@ class crawler():
         logger.addHandler(fh), logger.addHandler(ch)
         return logger
 
+#----------------DB Operations-----------------
+
     def prepareDBConnection(self):
         # Connects to DB and return its connection,
         # Create DB file path if not exist
@@ -259,7 +261,7 @@ class crawler():
         #    of the given file_name from DB;
         # If the filename has no record then return ''.
         retrieved = self.getLatest('ETag', file_name)
-        return '' if retrieved is None else retrieved[0]
+        return 'G' if retrieved is None else retrieved[0]
     
     def getLatestUpdatePath(self, file_name) -> str:
         # Return path of the latest crawl record
@@ -321,6 +323,21 @@ class crawler():
             (file_name, date, ETag, zoom_level, coord_x, coord_y, path) 
         )
 
+    def updateETag(self, file_name, date, ETag):
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            UPDATE crawl_records
+            SET ETag = ?
+            WHERE file_name = ?
+                AND crawled_at = ?
+                AND deleted IS "False"
+        ''',(ETag, file_name, date) 
+        )
+        if cursor.rowcount != 1:
+            self.logger.warning("Updated ETag for {} lines on {}, {}".format(cursor.rowcount, file_name, date))
+
+#-----------------File Getter/Putter--------------
+
     async def downloadImage(self, sess, URL):
         """下载给定URL的文件并返回
 
@@ -350,6 +367,7 @@ class crawler():
                 img = await response.read()
             return {'headers': response.headers, 'image': img}
 
+#--------Kedamadiff-internal-path generator-------
 
     def makePath(self, zoneLists, depth):
         """生成给定观察区域的图块路径。
@@ -533,35 +551,55 @@ class crawler():
 
         DL_img = await self.downloadImage(sess, URL)
         DL_img = DL_img['image']
-        In_Stock_Latest = self.getLatestUpdatePath(file_name) + file_name
+        last_update = self.getLatestUpdatePath(file_name) # NOTE: images/v1_daytime/20180228, TODO: 改save_in使之能生成此str
+        # Determine if the filename inexists in DB
+        isAdd = True if last_update == '' else False
+        In_Stock_Latest = last_update + '/' + file_name
 
-        with open(In_Stock_Latest, 'rb') as Prev_img:
-            # SHA1不一致，喻示图片发生了实质性修改 (Upd, Rep)
-            if hashlib.sha1(Prev_img .read()).hexdigest() != hashlib.sha1(DL_img).hexdigest():
-                # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
-                # 能否用一条逻辑实现“如果要插入的记录已存在则修改库中记录”？
+        # Calculate SHA1 from saved image patches.
+        try:
+            with open(In_Stock_Latest, 'rb') as Prev_img:
+                prev_img_SHA1 = hashlib.sha1(Prev_img.read()).hexdigest()
+        except FileNotFoundError: # TODO: change in Object-Storage mode
+            self.logger.warning('File {} not exist'.format(file_name))
+            prev_img_SHA1 = 'G'
+        finally:
+            DL_img_SHA1 = hashlib.sha1(DL_img).hexdigest()
 
-                if self.getLatestUpdateDate(file_name) == self.today:                     
-                    del self.update_history[file_name][-1]
-                    # self.deactivateCrawlRecord(file_name, self.today) 
-                    self.statistics.plus('Replace')
-                    ret_msg = 'Rep\t{}'.format(file_name)
+        # SHA1不一致，喻示图片发生了实质性修改 (Upd, Rep)
+        if prev_img_SHA1 != DL_img_SHA1:
+            # 同一天内两次抓到的图片发生了偏差，替换掉本地原来的最新图片和更新记录
+            # 能否用一条逻辑实现“如果要插入的记录已存在则修改库中记录”？
+            
+            # (Rep)
+            if self.getLatestUpdateDate(file_name) == self.today:                  
+                self.deactivateCrawlRecord(file_name, self.today) 
+                self.statistics.plus('Replace')
+                ret_msg = 'Rep\t{}'.format(file_name)
+            # (Upd)
+            else:
+                if isAdd:
+                    self.statistics.plus('Added')
+                    ret_msg = 'Add\t{}'.format(file_name)
                 else:
                     self.statistics.plus('Update')
                     ret_msg = 'Upd\t{}'.format(file_name)
-                self.update_history[file_name].append(
-                    {'Save_in': self.save_in.next(), 'ETag': response.headers['ETag']})
-                #self.addCrawlRecord(
-                #    file_name, self.today, response.headers['ETag'], 
-                #    self.target_depth, coord[0], coord[1], self.save_in.next())
-                with open(self.save_in.next()+file_name, 'wb') as f:
-                        f.write(DL_img)
-                        f.close()
-            else:
-                # SHA1一致，图片无实质性变化，则忽略该不同
-                self.statistics.plus('unModded')
-                ret_msg = 'nMOD\t{}'.format(file_name)
-            return ret_msg
+
+            #self.update_history[file_name].append(
+            #    {'Save_in': self.save_in.next(), 'ETag': response.headers['ETag']})
+            self.addCrawlRecord(
+                file_name, self.today, response.headers['ETag'], 
+                self.target_depth, coord[0], coord[1], self.save_in.next())
+            with open(self.save_in.next()+file_name, 'wb') as f:
+                    f.write(DL_img)
+                    f.close()
+        else:
+            # SHA1一致，图片无实质性变化，则忽略该不同(nMod)
+            self.updateETag(file_name, self.getLatestUpdateDate(file_name),
+                            response.headers['ETag'])
+            self.statistics.plus('unModded')
+            ret_msg = 'nMOD\t{}'.format(file_name)
+        return ret_msg
 
     async def visitPath(self, sess, path):  
         """抓取单张图片并对响应进行处理的工人
@@ -611,21 +649,16 @@ class crawler():
                         '''
                         # 库里有该图片
                         #else:
-                        # ETag不一致--丢给下一级处理
-                        # TODO: self.getLatestSavedETag(file_name) -> str
-                        try:
-                            if r.headers['ETag'] != self.latest_ETag[file_name]['ETag']: 
-                                # BUG: 👆latest_etag 中没有部分图块，而update_history里却有。
-                                # 这是由于那些图块均在地图边缘且latest_etag作为独立文件建立较晚，
-                                # 建立后图块就一直没更新了。
-                                # 建议删除update_history中的那些图块并校验两个数据文件中的键一致性。
-                                visitpath_status = 'ETag inconsistent'
-                                ret_msg = await self.processBySHA1(sess, URL, r, file_name, XY)
-                            # ETag一致--只出个log
-                            else:
-                                visitpath_status = 'ETag consistent'
-                                self.statistics.plus('Ignore')
-                                ret_msg = 'Ign\t{}'.format(file_name)
+                        # ETag不一致--丢给下一级处理 ((Add,)Upd, nMod, rep)
+                        if r.headers['ETag'] != self.getLatestSavedETag(file_name): 
+                            visitpath_status = 'ETag inconsistent'
+                            ret_msg = await self.processBySHA1(sess, URL, r, file_name, XY)
+                        # ETag一致--只出个log
+                        else:
+                            visitpath_status = 'ETag consistent'
+                            self.statistics.plus('Ignore')
+                            ret_msg = 'Ign\t{}'.format(file_name)
+                        '''
                         except KeyError as e: 
                             # update_history中的部分图块键在latest_etag中没有，是历史遗留问题。
                             # 在这catch掉异常，后面一行代码好添加正确的etag。
@@ -634,6 +667,9 @@ class crawler():
                             self.latest_ETag[file_name] = {'ETag' : self.update_history[file_name][-1]['ETag']}
                             self.logger.error('Copied ETag from update_history to latest_ETag for {}'.format(file_name))
                         self.latest_ETag[file_name]['ETag'] = r.headers['ETag']
+                        '''
+                        #BUG：nMod工况下需要更新DB中图块的ETag
+                        
                 self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                 return ret_msg
             except (KeyboardInterrupt) as e:
@@ -669,8 +705,8 @@ class crawler():
         bot = Bot(token = CrConf.telegram_bot_key )
 
         self.statistics = counter() # 统计抓图状态
-        self.update_history = {}  # 更新历史
-        self.latest_ETag = {} # 每个区块的最新ETag
+        self.update_history = None  # 更新历史
+        self.latest_ETag = None # 每个区块的最新ETag
 
 
         save_in = self.getImgdir(self.image_folder)
@@ -683,7 +719,6 @@ class crawler():
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
 
-
         # 维护一个抓图协程(池?)
         loop = asyncio.get_event_loop()
         try:
@@ -695,19 +730,22 @@ class crawler():
         finally:
             self.updateDBDates()
             if not self.dry_run:
+                self.logger.debug('Start saving DB at {}'.format(time.time()))
                 self.sqliteConnection.commit()
+            else:
+                self.logger.debug('Discarded DB changes in dry-run mode')
             self.sqliteConnection.close()
-
 
         # 将今天的抓图情况写回更新历史文件
         # TODO 若用测试代码读取生产库则要先复制生产库到测试环境。
-        self.logger.debug('Start dumping json at {}'.format(time.time()))
-        with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
-            json.dump(self.update_history, f, indent=2, sort_keys=True)
-            self.logger.debug('update_history dumped at {}'.format(time.time()))
-        with open('{}/latest_ETag.json'.format(self.data_folder), 'w') as f:
-            json.dump(self.latest_ETag,f,indent=2, sort_keys=True)
-            self.logger.debug('latest_ETag dumped at {}'.format(time.time()))
+        
+        #with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
+        #    json.dump(self.update_history, f, indent=2, sort_keys=True)
+        #    self.logger.debug('update_history dumped at {}'.format(time.time()))
+        #with open('{}/latest_ETag.json'.format(self.data_folder), 'w') as f:
+        #    json.dump(self.latest_ETag,f,indent=2, sort_keys=True)
+        #    self.logger.debug('latest_ETag dumped at {}'.format(time.time()))
+
         try:
             bot.send_message(CrConf.telegram_msg_recipient, 'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(self.statistics)))
         except Exception :
@@ -717,7 +755,7 @@ def main():
     try:
         for map_name, map_conf in map_list.items():
             if map_conf.enable_crawl == True:
-                cr = crawler(map_conf, noFetch=True)
+                cr = crawler(map_conf, noFetch=False)
                 cr.runsDaily()
                 if map_conf.last_total_depth != cr.total_depth:
                     map_conf.last_total_depth = cr.total_depth
@@ -732,7 +770,6 @@ def main():
             print(str(e),file = f)
         bot = Bot(token = CrConf.telegram_bot_key )
         bot.send_message(CrConf.telegram_msg_recipient,'Something went wrong, see logs/errors.txt for detail')
-
 
 
 if __name__ == '__main__':
