@@ -59,7 +59,7 @@ class MapTypeHelper():
     
     #def
 
-    #map_type = MapTypeHelper(self.getMapType)
+    #map_type = MapTypeHelper(self.UPDConn.getMapType)
 
 
 class counter():
@@ -111,12 +111,20 @@ class crawler():
         self.timestamp = str(int(time.time()))  # 请求图块要用，时区无关
         self.logger.debug('Today is set to {}'.format(self.today))
 
+        '''连接“抓取记录”数据库'''
+        # 读取图块更新史，若文件不存在则连带所述目录一同创建。
+        from util.update_history_DBConn import UpdateHistoryDBConn
+        self.UPDConn = UpdateHistoryDBConn(self.logger)
+        self.UPDConn.prepare(self.data_folder, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_folders) 
+
+
         '''抓取设置'''
-        self.map_type = self.probeMapType() if noFetch == False else self.getMapLastProbedRenderer() #渲染器种类 # BUG: 此时还未产生数据库连接
+        print('pre-dbconn')
+        self.map_type = self.probeMapType() if not noFetch else self.UPDConn.getMapLastProbedRenderer() #渲染器种类 # BUG: 此时还未产生数据库连接,是否将UPDConn提前到这里？
         self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
         self.max_crawl_workers = config.max_crawl_workers  # 最大抓图线程数
         # 缩放级别总数 
-        self.total_depth = self.getMapLastProbedDepth() if noFetch == True else self.fetchTotalDepth()# BUG: 此时还无DB Conn
+        self.total_depth = self.UPDConn.getMapLastProbedDepth() if noFetch == True else self.fetchTotalDepth()# BUG: 此时还无DB Conn
         self.logger.info('map type: {}; total depth: {}'.format(self.map_type, self.total_depth))
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         self.target_depth = config.target_depth
@@ -187,193 +195,6 @@ class crawler():
         logger.addHandler(fh), logger.addHandler(ch)
         return logger
 
-#----------------DB Operations-----------------
-
-    def prepareDBConnection(self):
-        # Connects to DB and return its connection,
-        # Create DB file path if not exist
-        # Create DB Tables and headers on DB file creation.
-        try:
-            sqliteConnection = sqlite3.connect(
-                '{}/crawl_records.sqlite3'.format(self.data_folder))
-        except sqlite3.OperationalError:
-            self.logger.warning(
-                'DB not found, creating its directory: ')
-            self.logger.warning(
-                '{}/crawl_records.sqlite3'.format(self.data_folder))
-            if not os.path.exists(self.data_folder):
-                os.makedirs(self.data_folder)
-                self.logger.info(
-                    'Made directory\t./{}'.format(self.data_folder)
-                    )
-            sqliteConnection = sqlite3.connect(
-                '{}/crawl_records.sqlite3'.format(self.data_folder))
-        self.logger.info(
-            'Connected to {}/crawl_records.sqlite3'.format(self.data_folder))
-
-        # init tables with headers.
-        cursor = sqliteConnection.cursor()
-        #    table: crawl_records: init once, appends every crawl.file; updates manually.
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS crawl_records(
-                file_name varchar(40) NOT NULL,
-                crawled_at varchar(8) NOT NULL,
-                map_rotation varchar(2), 
-                ETag varchar(30) NOT NULL, 
-                zoom_level INTEGER NOT NULL,
-                coord_x INTEGER NOT NULL,
-                coord_y INTEGER NOT NULL,
-                frozen boolean DEFAULT False,
-                deleted boolean DEFAULT False
-	        )'''
-        )
-        #    table: map_attributes: init once, never updates (unless manually)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS map_attributes(
-                id INTEGER PRIMARY KEY NOT NULL,
-                map_name varchar(30),
-                map_savename varchar(30),
-                storage_type varchar(6),
-                data_path varchar(128)
-            )''' # This table only 1 row, id can only == 1
-        )
-        # Init map_attributes, pass if record already exists
-        cursor.execute('''
-            INSERT OR IGNORE INTO map_attributes
-                (id, map_name, map_savename, storage_type, data_path)
-            VALUES(?,?,?,?,?)''',
-            (1, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_folders)
-        )
-
-        #    table: last_update: init once, updates every crawl.
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS last_update(
-                id INTEGER PRIMARY KEY NOT NULL,
-                date varchar(8),
-                total_depth INTEGER,
-                renderer varchar(128)
-            )'''
-        )
-
-        return sqliteConnection
-
-    def updateDBDates(self): # TODO: pass today,depth,type to this method.
-        # update 'last_update' in DB.last_update .
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO last_update
-                (id, date, total_depth, renderer)
-            VALUES (?,?,?,?)''',
-            (1, 
-            self.today,
-            self.total_depth,
-            self.map_type
-            )
-        )
-
-    def getLatestSavedETag(self, file_name) -> str: 
-        # Return the latest saved ETag 
-        #    of the given file_name from DB;
-        # If the filename has no record then return ''.
-        retrieved = self.getLatest('ETag', file_name)
-        return 'G' if retrieved is None else retrieved[0]
-
-    def getLatestUpdateDate(self, file_name) -> str:
-        # Return the latest update date 
-        #    of the given file_name from DB;
-        # example: '20201112'
-        retrieved = self.getLatest('ETag', file_name) # ETag is not used in this function
-        # ... but essential to make a correct function call.
-        return '' if retrieved is None else retrieved[1]
-
-    def getLatest(self, item, file_name):
-        # Return the latest item from DB
-        # If item has no record then return ''.
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            SELECT {}, crawled_at
-            FROM crawl_records
-            WHERE file_name = ? AND deleted IS "False"
-            ORDER BY crawled_at DESC
-            LIMIT 1
-        '''.format(item), (file_name,) 
-        )
-        retrieved = cursor.fetchone() 
-        return retrieved
-
-    def getMapStorageType(self):
-        # return 'local' or 's3'
-        retrieved = self.getMapAttr('map_attributes', 'storage_type')
-        # if no record then return config else return record
-        return CrConf.storage_type if retrieved == None else retrieved[0] # TODO: 在数据库无信息返回配置文件的storage_type时给出warning
-
-    def getMapDatapath(self):
-        retrieved = self.getMapAttr('map_attributes', 'data_path')
-        return CrConf.data_folders if retrieved == None else retrieved[0] # TODO: 同上
-
-    def getMapLastProbedDepth(self):
-        retrieved = self.getMapAttr('last_update', 'total_depth') #TODO
-        if retrieved == None: raise ValueError('No recorded crawled depth information')
-        return retrieved[0]
-
-    #def getMapLastCrawledDate(self):
-    #    retrieved = self.getMapAttr('last_update', 'date') 
-
-
-    def getMapLastProbedRenderer(self):
-        retrieved = self.getMapAttr('last_update', 'renderer') #TODO
-        if retrieved == None: raise ValueError('No renderer recorded')
-        return retrieved[0]
-
-    def getMapAttr(self, table, attr):
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            SELECT {}
-            FROM {}
-            WHERE id = 1
-        '''.format(attr, table)) 
-        return cursor.fetchone()   
-
-    def deactivateCrawlRecord(self, file_name, date):
-        # Soft delete a record in crawl record DB
-        # accroadign to given filename and date.
-        # show warning message if row(s) other than 1 is affected.
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            UPDATE crawl_records
-            SET deleted = "True"
-            WHERE file_name = ?
-                AND crawled_at = ?
-                AND deleted IS "False"
-        ''',(file_name, date) 
-        )
-        if cursor.rowcount != 1:
-            self.logger.warning("Deactivated {} lines on {}, {}".format(cursor.rowcount, file_name, date))
-        else:
-            self.logger.info("Deactivated {} lines on {}, {}".format(cursor.rowcount, file_name, date))
-        return 
-
-    def addCrawlRecord(self, file_name, date, ETag, zoom_level, coord_x, coord_y):
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            INSERT INTO crawl_records
-            (file_name, crawled_at, ETag, zoom_level, coord_x, coord_y)
-            VALUES (?,?,?,?,?,?)''',
-            (file_name, date, ETag, zoom_level, coord_x, coord_y) 
-        )
-
-    def updateETag(self, file_name, date, ETag):
-        cursor = self.sqliteConnection.cursor()
-        cursor.execute('''
-            UPDATE crawl_records
-            SET ETag = ?
-            WHERE file_name = ?
-                AND crawled_at = ?
-                AND deleted IS "False"
-        ''',(ETag, file_name, date) 
-        )
-        if cursor.rowcount != 1:
-            self.logger.warning("Updated ETag for {} lines on {}, {}".format(cursor.rowcount, file_name, date))
 
 #-----------------File Getter/Putter--------------
 
@@ -410,8 +231,9 @@ class crawler():
         #      getSavedImage(self, file_name, date, type = self.getMapStorageType <或fallback什么的>, tolerance = 1 <调用深度<=2 >)
         # An open()able image patch getter that can: 
         # read from local file storage and TODO: object storage. 
-        img_storage_type = self.getMapStorageType()  # TODO: cache this DB lookup result to avoid excessive lookup.
-        img_storage_path = self.getMapDatapath() # TODO: same as above line.
+        # TODO BUG: what if no DB conn when calling this method?
+        img_storage_type = self.UPDConn.getMapStorageType() or CrConf.storage_type  # TODO: UPDConn.get...(): 无数据库连接怎么办  TODO: cache this DB lookup result to avoid excessive lookup.
+        img_storage_path = self.UPDConn.getMapDatapath() or CrConf.data_folders # TODO: + TODO: same as above line.
         
         if img_storage_type == 'local':
             with open('{}/{}/images/{}/{}/{}'.format(CrConf.project_root, img_storage_path, self.map_savename, date, file_name), 'rb') as f:
@@ -592,20 +414,20 @@ class crawler():
         #       在Rep工况下要将已有的相同(日期，文件名)记录置为无效：
         #       新方法： deactivateCrawlRecord()
         
-
         DL_img = await self.downloadImage(sess, URL)
         DL_img = DL_img['image']
-        last_update = self.getLatestUpdateDate(file_name) # NOTE: '20180228', TODO: 改save_in使之能生成此str
+        last_update = self.UPDConn.getLatestUpdateDate(file_name) # NOTE: '20180228', TODO: 改save_in使之能生成此str
         # Determine if the filename inexists in DB
         isAdd = True if last_update == '' else False
+        print('isAdd = ', isAdd)
         In_Stock_Latest = last_update + '/' + file_name
 
         # Calculate SHA1 from saved image patches.
         try:
-            Prev_img = self.getSavedImage(file_name, self.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
-            prev_img_SHA1 = hashlib.sha1(Prev_img.read()).hexdigest()
-        except FileNotFoundError: # TODO: change in Object-Storage mode
-            self.logger.warning('File {} not exist'.format(file_name))
+            Prev_img = self.getSavedImage(file_name, self.UPDConn.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
+            prev_img_SHA1 = hashlib.sha1(Prev_img).hexdigest()
+        except FileNotFoundError: # Also happenes when isAdd == True; TODO: change in Object-Storage mode
+            self.logger.warning('File\t{} inexist'.format(file_name))
             prev_img_SHA1 = 'G'
         finally:
             DL_img_SHA1 = hashlib.sha1(DL_img).hexdigest()
@@ -616,8 +438,8 @@ class crawler():
             # 能否用一条逻辑实现“如果要插入的记录已存在则修改库中记录”？
             
             # (Rep)
-            if self.getLatestUpdateDate(file_name) == self.today:                  
-                self.deactivateCrawlRecord(file_name, self.today) 
+            if self.UPDConn.getLatestUpdateDate(file_name) == self.today:                  
+                self.UPDConn.deactivateCrawlRecord(file_name, self.today) 
                 self.statistics.plus('Replace')
                 ret_msg = 'Rep\t{}'.format(file_name)
             # (Upd)
@@ -631,7 +453,7 @@ class crawler():
 
             #self.update_history[file_name].append(
             #    {'Save_in': self.save_in.next(), 'ETag': response.headers['ETag']})
-            self.addCrawlRecord(
+            self.UPDConn.addCrawlRecord(
                 file_name, self.today, response.headers['ETag'], 
                 self.target_depth, coord[0], coord[1])
             with open(self.save_in.next()+file_name, 'wb') as f: # TODO: save_image(), keep aware of dry-run and OSS
@@ -639,7 +461,8 @@ class crawler():
                     f.close()
         else:
             # SHA1一致，图片无实质性变化，则忽略该不同(nMod)
-            self.updateETag(file_name, self.getLatestUpdateDate(file_name),
+            # file_name is guaranteed to have record.
+            self.UPDConn.updateETag(file_name, self.UPDConn.getLatestUpdateDate(file_name),
                             response.headers['ETag'])
             self.statistics.plus('unModded')
             ret_msg = 'nMOD\t{}'.format(file_name)
@@ -694,7 +517,7 @@ class crawler():
                         # 库里有该图片
                         #else:
                         # ETag不一致--丢给下一级处理 ((Add,)Upd, nMod, rep)
-                        if r.headers['ETag'] != self.getLatestSavedETag(file_name): 
+                        if r.headers['ETag'] != self.UPDConn.getLatestSavedETag(file_name): 
                             visitpath_status = 'ETag inconsistent'
                             ret_msg = await self.processBySHA1(sess, URL, r, file_name, XY)
                         # ETag一致--只出个log
@@ -714,7 +537,7 @@ class crawler():
                         '''
                         #BUG：nMod工况下需要更新DB中图块的ETag
                         
-                self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
+                self.logger.warning(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                 return ret_msg
             except (KeyboardInterrupt) as e:
                 raise e
@@ -723,13 +546,13 @@ class crawler():
             except Exception as e:
                 #if e is keyboardexception: raise;
                 self.logger.error(
-                    'No.{} for\t{}\t{}'.format(tryed_time, path, e))
+                    'No.{} for\t{}({})\t{}'.format(tryed_time, path, self.path2xy(path, self.total_depth), e))
                 self.logger.error('at: {}'.format(visitpath_status))
                 tryed_time += 1
                 if tryed_time >= 5:
                     self.statistics.plus('Fail')
                     ret_msg = 'Fail\t{}'.format(path)
-                    self.logger.warn(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
+                    self.logger.warning(ret_msg) if 'Fail' in ret_msg or 'Rep' in ret_msg else self.logger.info(ret_msg)
                     return ret_msg
             # using `finally` here will break the 5-time-tolerant `while`-loop.
 
@@ -756,9 +579,7 @@ class crawler():
         save_in = self.getImgdir(self.image_folder)
         self.save_in = threadsafe_generator(save_in)
 
-        # 读取图块更新史，若文件不存在则连带所述目录一同创建。
-        # -> Get a DB object() ?
-        self.sqliteConnection = self.prepareDBConnection()
+        # Image update history DB read in self.__init__() .
 
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
@@ -768,17 +589,19 @@ class crawler():
         try:
             loop.run_until_complete(self.visitPaths(to_crawl))
         except KeyboardInterrupt:
-            self.logger.warn('User pressed ctrl+c.')
-            self.logger.warn('Will exit when other threads return.')
+            self.logger.warning('User pressed ctrl+c.')
+            self.logger.warning('Will exit when other threads return.')
             return 0
         finally:
-            self.updateDBDates()
+            self.UPDConn.updateDBDates(self.today, self.total_depth, self.map_type)
             if not self.dry_run:
                 self.logger.debug('Start saving DB at {}'.format(time.time()))
-                self.sqliteConnection.commit()
+                self.UPDConn.commit()
             else:
                 self.logger.debug('Discarded DB changes in dry-run mode')
-            self.sqliteConnection.close() # BUG: ctrl+c close后，下张地图无法重启DBConn。
+            self.UPDConn.close() # BUG: ctrl+c close后，下张地图新初始化的DBConn带有上一个(首个)地图名称。
+            # 可能是由于eventLoop在ctrl+c后没有清理掉，请尝试此方向。
+            self.logger.info('DB closed')
 
         try:
             print('Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(self.statistics)))
@@ -792,8 +615,9 @@ def main():
     try:
         for map_name, map_conf in map_list.items():
             if map_conf.enable_crawl == True:
-                cr = crawler(map_conf, noFetch=True)
+                cr = crawler(map_conf, noFetch=False)
                 cr.runsDaily()
+                del cr
                 #if map_conf.last_total_depth != cr.total_depth: -> 丢给数据库处理
                 #    map_conf.last_total_depth = cr.total_depth
             else: 
