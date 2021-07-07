@@ -98,12 +98,12 @@ class crawler():
         '''mapcrafter版： https://map.nyaacat.com/kedama/v3_daytime/tl/3/2/2/2/2/2/4.jpg'''
         self.map_domain = config.map_domain  # Overviewer地图地址
         self.map_name = config.map_name  # 地图名称
-        
+        # sometimes destination map will rename, we can choose a fixed name for them to save.
         self.map_savename = self.map_name if 'map_savename' not in config else config.map_savename
         
-        self.image_folder = '{}/images/{}'.format(CrConf.data_folders, self.map_savename)  # 图块存哪
-        self.data_folder  = '{}/data/{}'  .format(CrConf.data_folders, self.map_savename)  # 更新历史存哪（以后升级数据库？）
-        self.log_folder  =  '{}/log/{}'   .format(CrConf.data_folders, self.map_savename)  # 日志文件夹
+        self.image_folder = '{}/{}/images/{}'.format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 图块存哪
+        self.data_folder  = '{}/{}/data/{}'  .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder  =  '{}/{}/log/{}'   .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 日志文件夹
 
         os.environ['TZ'] = CrConf.timezone #保留这行 毕竟在Linux里还会用，能让日志日期正确。
         self.today = datetime.now(pytz.timezone(CrConf.timezone)).strftime('%Y%m%d')
@@ -112,19 +112,19 @@ class crawler():
         self.logger.debug('Today is set to {}'.format(self.today))
 
         '''抓取设置'''
-        self.map_type = self.getMapType() if noFetch == False else config.latest_renderer #渲染器种类 # TODO: 最新渲染器种类丢到数据库去或取消掉
+        self.map_type = self.probeMapType() if noFetch == False else self.getMapLastProbedRenderer() #渲染器种类 # BUG: 此时还未产生数据库连接
         self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
-        self.max_threads = config.max_crawl_workers  # 最大抓图线程数
-        # 缩放级别总数 TODO: 从数据库中取数
-        self.total_depth = config.last_total_depth if noFetch == True else self.fetchTotalDepth(
-        )
+        self.max_crawl_workers = config.max_crawl_workers  # 最大抓图线程数
+        # 缩放级别总数 
+        self.total_depth = self.getMapLastProbedDepth() if noFetch == True else self.fetchTotalDepth()# BUG: 此时还无DB Conn
+        self.logger.info('map type: {}; total depth: {}'.format(self.map_type, self.total_depth))
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         self.target_depth = config.target_depth
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
         self.crawl_zones = ast.literal_eval(config.crawl_zones)
         self.dry_run = False # In dry-run mode, neither commit DB nor save image file, while logs are permitted.
 
-    def getMapType(self):
+    def probeMapType(self):
         """确定地图种类
         
         探测地图站点中，与特定渲染器相关的js文件（名），从而得知它们用了什么渲染器。
@@ -164,8 +164,6 @@ class crawler():
         """申请并配置抓取器所用到的日志记录器
 
         若日志文件夹不存在将被创建，向终端输出长度较短的文本，向日志文件写入完整长度的报告
-
-        Todo: 每次抓取摘要：时间，抓取地图，抓取结果统计[，存储配额剩余容量]
         
         Args: None
 
@@ -183,7 +181,7 @@ class crawler():
         datefmt_ch = '%H:%M:%S'  # 输出毫秒要改logging的代码，你想清楚就好。
         fmt_fh = '[%(asctime)s]-[%(levelname).1s:%(funcName)-20.15s] %(message)s'
         # 屏幕输出相对简短
-        fmt_ch = '[%(asctime)s.%(msecs)03d]-[%(levelname).1s:%(funcName).6s] %(message).60s'
+        fmt_ch = '[%(asctime)s.%(msecs)03d]-[{}]-[%(levelname).1s:%(funcName).6s] %(message).60s'.format(self.map_savename)
         fh.setFormatter(logging.Formatter(fmt_fh))
         ch.setFormatter(logging.Formatter(fmt_ch, datefmt_ch))
         logger.addHandler(fh), logger.addHandler(ch)
@@ -197,62 +195,79 @@ class crawler():
         # Create DB Tables and headers on DB file creation.
         try:
             sqliteConnection = sqlite3.connect(
-                '{}/crawl_records.db'.format(self.data_folder))
+                '{}/crawl_records.sqlite3'.format(self.data_folder))
         except sqlite3.OperationalError:
             self.logger.warning(
                 'DB not found, creating its directory: ')
             self.logger.warning(
-                '{}/crawl_records.db'.format(self.data_folder))
+                '{}/crawl_records.sqlite3'.format(self.data_folder))
             if not os.path.exists(self.data_folder):
                 os.makedirs(self.data_folder)
                 self.logger.info(
                     'Made directory\t./{}'.format(self.data_folder)
                     )
             sqliteConnection = sqlite3.connect(
-                '{}/crawl_records.db'.format(self.data_folder))
+                '{}/crawl_records.sqlite3'.format(self.data_folder))
         self.logger.info(
-            'Connected to {}/crawl_records.db'.format(self.data_folder))
+            'Connected to {}/crawl_records.sqlite3'.format(self.data_folder))
 
         # init tables with headers.
         cursor = sqliteConnection.cursor()
+        #    table: crawl_records: init once, appends every crawl.file; updates manually.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS crawl_records(
-                file_name varchar(100) NOT NULL,
+                file_name varchar(40) NOT NULL,
                 crawled_at varchar(8) NOT NULL,
                 map_rotation varchar(2), 
                 ETag varchar(30) NOT NULL, 
                 zoom_level INTEGER NOT NULL,
                 coord_x INTEGER NOT NULL,
-                coord_y INTEGET NOT NULL,
-                stored_at varchar(255),
+                coord_y INTEGER NOT NULL,
                 frozen boolean DEFAULT False,
                 deleted boolean DEFAULT False
 	        )'''
         )
+        #    table: map_attributes: init once, never updates (unless manually)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS map_attributes(
                 id INTEGER PRIMARY KEY NOT NULL,
                 map_name varchar(30),
-                data_path varchar(128),
-                last_total_depth INTEGER,
-                last_update varchar(8)
-            )''' # This table only 1 row, id only == 1
+                map_savename varchar(30),
+                storage_type varchar(6),
+                data_path varchar(128)
+            )''' # This table only 1 row, id can only == 1
+        )
+        # Init map_attributes, pass if record already exists
+        cursor.execute('''
+            INSERT OR IGNORE INTO map_attributes
+                (id, map_name, map_savename, storage_type, data_path)
+            VALUES(?,?,?,?,?)''',
+            (1, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_folders)
+        )
+
+        #    table: last_update: init once, updates every crawl.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS last_update(
+                id INTEGER PRIMARY KEY NOT NULL,
+                date varchar(8),
+                total_depth INTEGER,
+                renderer varchar(128)
+            )'''
         )
 
         return sqliteConnection
 
-    def updateDBDates(self):
-        # update 'last_update' in DB.map_attributes .
+    def updateDBDates(self): # TODO: pass today,depth,type to this method.
+        # update 'last_update' in DB.last_update .
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
-            INSERT OR REPLACE INTO map_attributes
-                (id, map_name, data_path, last_total_depth, last_update)
-            VALUES (?,?,?,?,?)''',
+            INSERT OR REPLACE INTO last_update
+                (id, date, total_depth, renderer)
+            VALUES (?,?,?,?)''',
             (1, 
-            self.map_name, 
-            CrConf.data_folders,
+            self.today,
             self.total_depth,
-            self.today
+            self.map_type
             )
         )
 
@@ -262,14 +277,6 @@ class crawler():
         # If the filename has no record then return ''.
         retrieved = self.getLatest('ETag', file_name)
         return 'G' if retrieved is None else retrieved[0]
-    
-    def getLatestUpdatePath(self, file_name) -> str:
-        # Return path of the latest crawl record
-        #    of the given file_name from DB;
-        # example: 'images/v1_daytime/20180228/' for -3_184_-200.jpg
-        # If filename has no record then return ''.
-        retrieved = self.getLatest('stored_at', file_name)
-        return '' if retrieved is None else retrieved[0]
 
     def getLatestUpdateDate(self, file_name) -> str:
         # Return the latest update date 
@@ -282,7 +289,6 @@ class crawler():
     def getLatest(self, item, file_name):
         # Return the latest item from DB
         # If item has no record then return ''.
-        # TODO: Filter out `deleted = True` records.
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             SELECT {}, crawled_at
@@ -294,6 +300,39 @@ class crawler():
         )
         retrieved = cursor.fetchone() 
         return retrieved
+
+    def getMapStorageType(self):
+        # return 'local' or 's3'
+        retrieved = self.getMapAttr('map_attributes', 'storage_type')
+        # if no record then return config else return record
+        return CrConf.storage_type if retrieved == None else retrieved[0] # TODO: 在数据库无信息返回配置文件的storage_type时给出warning
+
+    def getMapDatapath(self):
+        retrieved = self.getMapAttr('map_attributes', 'data_path')
+        return CrConf.data_folders if retrieved == None else retrieved[0] # TODO: 同上
+
+    def getMapLastProbedDepth(self):
+        retrieved = self.getMapAttr('last_update', 'total_depth') #TODO
+        if retrieved == None: raise ValueError('No recorded crawled depth information')
+        return retrieved[0]
+
+    #def getMapLastCrawledDate(self):
+    #    retrieved = self.getMapAttr('last_update', 'date') 
+
+
+    def getMapLastProbedRenderer(self):
+        retrieved = self.getMapAttr('last_update', 'renderer') #TODO
+        if retrieved == None: raise ValueError('No renderer recorded')
+        return retrieved[0]
+
+    def getMapAttr(self, table, attr):
+        cursor = self.sqliteConnection.cursor()
+        cursor.execute('''
+            SELECT {}
+            FROM {}
+            WHERE id = 1
+        '''.format(attr, table)) 
+        return cursor.fetchone()   
 
     def deactivateCrawlRecord(self, file_name, date):
         # Soft delete a record in crawl record DB
@@ -314,13 +353,13 @@ class crawler():
             self.logger.info("Deactivated {} lines on {}, {}".format(cursor.rowcount, file_name, date))
         return 
 
-    def addCrawlRecord(self, file_name, date, ETag, zoom_level, coord_x, coord_y, path):
+    def addCrawlRecord(self, file_name, date, ETag, zoom_level, coord_x, coord_y):
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             INSERT INTO crawl_records
-            (file_name, crawled_at, ETag, zoom_level, coord_x, coord_y, stored_at)
-            VALUES (?,?,?,?,?,?,?)''',
-            (file_name, date, ETag, zoom_level, coord_x, coord_y, path) 
+            (file_name, crawled_at, ETag, zoom_level, coord_x, coord_y)
+            VALUES (?,?,?,?,?,?)''',
+            (file_name, date, ETag, zoom_level, coord_x, coord_y) 
         )
 
     def updateETag(self, file_name, date, ETag):
@@ -366,6 +405,29 @@ class crawler():
             if response.status == 200:
                 img = await response.read()
             return {'headers': response.headers, 'image': img}
+
+    def getSavedImage(self, file_name, date): # , DBconn
+        #      getSavedImage(self, file_name, date, type = self.getMapStorageType <或fallback什么的>, tolerance = 1 <调用深度<=2 >)
+        # An open()able image patch getter that can: 
+        # read from local file storage and TODO: object storage. 
+        img_storage_type = self.getMapStorageType()  # TODO: cache this DB lookup result to avoid excessive lookup.
+        img_storage_path = self.getMapDatapath() # TODO: same as above line.
+        
+        if img_storage_type == 'local':
+            with open('{}/{}/images/{}/{}/{}'.format(CrConf.project_root, img_storage_path, self.map_savename, date, file_name), 'rb') as f:
+                img = f.read()
+            return img # raise any possible error in "local file" mode
+        elif img_storage_type == 'S3':
+            pass
+        # TODO: 如果S3失败则转入Local,如果local失败则raise。
+
+    def saveImage(self, file_name): 
+        # save to:
+        # [s3_bucket/local_root]/{data_folders}/images/{map_savename}/{date}/{file_name}
+        # map_savename, date and [storage_type] included in self;
+        # TODO: Local file + directory not established = mkdir + save
+        # TODO: implement this
+        pass
 
 #--------Kedamadiff-internal-path generator-------
 
@@ -504,24 +566,6 @@ class crawler():
 
     '''，，一轮完成而不是先head再get'''      
 
-    async def addNewImg(self, sess, path, URL, file_name):
-        """向文件系统和更新历史记录中添加新图片
-        
-        Args: 
-            URL (str): The url of a specific image.
-            file_name (str): What to save the img as.
-        Returns:
-            ret_msg (str): The log message of the very image."""
-        # 把 save_in 传入，把update_history 提到self里，就可将此方法提出上一层方法去。
-        # 为适应数据库所做的规划：将update_history的赋值行为改成数据库insert操作但不commit
-        response = await self.downloadImage(sess, URL)
-        self.update_history[file_name] = (
-            [{'Save_in': self.save_in.next(), 'ETag': response['headers']['ETag']}])
-        with open(self.save_in.next()+file_name, 'wb') as f:
-            f.write(response['image'])
-            f.close()
-        ret_msg = 'Add\t{}.jpg as {}'.format(path, file_name)
-        return ret_msg 
 
     async def processBySHA1(self, sess, URL, response, file_name, coord):
         """下载图块并根据摘要来处理文件
@@ -551,15 +595,15 @@ class crawler():
 
         DL_img = await self.downloadImage(sess, URL)
         DL_img = DL_img['image']
-        last_update = self.getLatestUpdatePath(file_name) # NOTE: images/v1_daytime/20180228, TODO: 改save_in使之能生成此str
+        last_update = self.getLatestUpdateDate(file_name) # NOTE: '20180228', TODO: 改save_in使之能生成此str
         # Determine if the filename inexists in DB
         isAdd = True if last_update == '' else False
         In_Stock_Latest = last_update + '/' + file_name
 
         # Calculate SHA1 from saved image patches.
         try:
-            with open(In_Stock_Latest, 'rb') as Prev_img:
-                prev_img_SHA1 = hashlib.sha1(Prev_img.read()).hexdigest()
+            Prev_img = self.getSavedImage(file_name, self.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
+            prev_img_SHA1 = hashlib.sha1(Prev_img.read()).hexdigest()
         except FileNotFoundError: # TODO: change in Object-Storage mode
             self.logger.warning('File {} not exist'.format(file_name))
             prev_img_SHA1 = 'G'
@@ -589,8 +633,8 @@ class crawler():
             #    {'Save_in': self.save_in.next(), 'ETag': response.headers['ETag']})
             self.addCrawlRecord(
                 file_name, self.today, response.headers['ETag'], 
-                self.target_depth, coord[0], coord[1], self.save_in.next())
-            with open(self.save_in.next()+file_name, 'wb') as f:
+                self.target_depth, coord[0], coord[1])
+            with open(self.save_in.next()+file_name, 'wb') as f: # TODO: save_image(), keep aware of dry-run and OSS
                     f.write(DL_img)
                     f.close()
         else:
@@ -690,7 +734,7 @@ class crawler():
             # using `finally` here will break the 5-time-tolerant `while`-loop.
 
     async def visitPaths(self, paths):
-        self.crawlJob_semaphore = asyncio.Semaphore(self.max_threads) # TODO: rename 'threads' as 'workers'
+        self.crawlJob_semaphore = asyncio.Semaphore(self.max_crawl_workers) 
         async with aiohttp.ClientSession(read_bufsize = 2 ** 18) as sess:
             await asyncio.gather(*[self.visitPath(sess, path) for path in paths])
             
@@ -734,20 +778,13 @@ class crawler():
                 self.sqliteConnection.commit()
             else:
                 self.logger.debug('Discarded DB changes in dry-run mode')
-            self.sqliteConnection.close()
-
-        # 将今天的抓图情况写回更新历史文件
-        # TODO 若用测试代码读取生产库则要先复制生产库到测试环境。
-        
-        #with open('{}/update_history.json'.format(self.data_folder), 'w') as f:
-        #    json.dump(self.update_history, f, indent=2, sort_keys=True)
-        #    self.logger.debug('update_history dumped at {}'.format(time.time()))
-        #with open('{}/latest_ETag.json'.format(self.data_folder), 'w') as f:
-        #    json.dump(self.latest_ETag,f,indent=2, sort_keys=True)
-        #    self.logger.debug('latest_ETag dumped at {}'.format(time.time()))
+            self.sqliteConnection.close() # BUG: ctrl+c close后，下张地图无法重启DBConn。
 
         try:
-            bot.send_message(CrConf.telegram_msg_recipient, 'Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(self.statistics)))
+            print('Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(self.statistics)))
+            self.logger.info('Crawl result {} for {} : \n{}'.format(self.today,self.map_name,str(self.statistics)))
+            self.logger.info('Telegram sending message.')
+            bot.send_message(CrConf.telegram_msg_recipient, '{}Crawl result {} for {} : \n{}'.format('[Dev] ' if 'dev' in self.data_folder else '', self.today, self.map_name, str(self.statistics)))
         except Exception :
             self.logger.warning('Telegram bot failed sending {} statistics!'.format(self.map_name))
 
@@ -755,10 +792,10 @@ def main():
     try:
         for map_name, map_conf in map_list.items():
             if map_conf.enable_crawl == True:
-                cr = crawler(map_conf, noFetch=False)
+                cr = crawler(map_conf, noFetch=True)
                 cr.runsDaily()
-                if map_conf.last_total_depth != cr.total_depth:
-                    map_conf.last_total_depth = cr.total_depth
+                #if map_conf.last_total_depth != cr.total_depth: -> 丢给数据库处理
+                #    map_conf.last_total_depth = cr.total_depth
             else: 
                 print("skipping map {}".format(map_name))
         #f.seek(0)
@@ -766,7 +803,7 @@ def main():
         #f.truncate()
     except Exception as e:
         print(e)        
-        with open('{}/log/errors.txt'.format(CrConf.data_folders),'a+') as f:
+        with open('{}/{}/log/errors.txt'.format(CrConf.project_root, CrConf.data_folders),'a+') as f:
             print(str(e),file = f)
         bot = Bot(token = CrConf.telegram_bot_key )
         bot.send_message(CrConf.telegram_msg_recipient,'Something went wrong, see logs/errors.txt for detail')

@@ -2,6 +2,7 @@ images/*
 logs/*
 log/*
 .vscode*
+.vscode/*
 __pycache__/*
 *.pyc
 
@@ -11,3 +12,5 @@ config_bak.json
 configs/config.py
 configs/crawl_list.py
 config_hide.json
+
+*.sqbpro

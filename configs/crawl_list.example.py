@@ -8,9 +8,9 @@ maps =  {
         "last_total_depth": 10,
         "latest_renderer": "Mapcrafter",
         "map_domain": "https://map.example.com/kedama",
-        "map_name": "v1",
+        "map_name": "v1", # In the long run, map's URL name may change, ...
         "map_rotation": "tl",
-        "map_savename": "v1_daytime",
+        "map_savename": "v1_daytime", # ... while we can keep a consistent name for where we save the map, 'savename' are meant to be unchanged.
         "max_crawl_workers": 16,
         "note": "[((0, -8), 80, 40)]",
         "target_depth": -3
