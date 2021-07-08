@@ -558,7 +558,7 @@ class crawler():
 
     async def visitPaths(self, paths):
         self.crawlJob_semaphore = asyncio.Semaphore(self.max_crawl_workers) 
-        async with aiohttp.ClientSession(read_bufsize = 2 ** 18) as sess:
+        async with aiohttp.ClientSession() as sess:
             await asyncio.gather(*[self.visitPath(sess, path) for path in paths])
             
 
@@ -584,8 +584,8 @@ class crawler():
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
 
-        # 维护一个抓图协程(池?)
-        loop = asyncio.get_event_loop()
+        # 维护一个抓图协程(池/队列?),中途退出后下个地图换新队列，原队列雪藏不管，总之是个 TODO: dirty fix。
+        loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self.visitPaths(to_crawl))
         except KeyboardInterrupt:
@@ -593,6 +593,8 @@ class crawler():
             self.logger.warning('Will exit when other threads return.')
             return 0
         finally:
+            #loop.close() # BUG: 不行，close后下个地图无法获取。
+            # BUG: 如果中途keyboard interrupt的话，DB不应commit而应该rollback.
             self.UPDConn.updateDBDates(self.today, self.total_depth, self.map_type)
             if not self.dry_run:
                 self.logger.debug('Start saving DB at {}'.format(time.time()))
