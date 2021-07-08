@@ -65,7 +65,7 @@ class MapTypeHelper():
 class counter():
     def __init__(self):
         self.a = {'404': 0, 'Fail': 0, 'Ignore': 0, 'Added': 0,
-                  'Update': 0, 'Replace': 0, 'unModded': 0}
+                  'Update': 0, 'Replace': 0, 'unModded': 0, 'Cancel': 0}
 
     def plus(self, str):
         self.a[str] += 1
@@ -78,6 +78,8 @@ class counter():
             self.a['Update'], self.a['unModded'], self.a['Ignore'], self.a['404'], self.a['Fail'])
         if self.a['Replace'] != 0:
             str += 'Replace:\t{}\n'.format(self.a['Replace'])
+        if self.a['Cancel'] != 0:
+            str += 'Cancel:\t{}\n'.format(self.a['Cancel'])
         return str
 
 class crawler():
@@ -541,6 +543,16 @@ class crawler():
                 return ret_msg
             except (KeyboardInterrupt) as e:
                 raise e
+            
+            except RuntimeError as e:
+                # 任务取消
+                if 'Event loop is closed' in str(e):
+                    self.statistics.plus('Cancel')
+                    ret_msg = 'Cancel\t{}'.format(path)
+                    self.logger.debug(ret_msg)
+                    return ret_msg
+                else:
+                    raise e
             # 网络遇到问题，重试最多5次
             # BUG: 异常处理顺序导致部分爬取状态（例如：网络异常爬取报错报错）下的ctrl+c无效。
             except Exception as e:
@@ -584,7 +596,12 @@ class crawler():
         to_crawl = self.makePath(
             self.crawl_zones, self.target_depth)  # 生成要抓取的图片坐标
 
-        # 维护一个抓图协程(池/队列?),中途退出后下个地图换新队列，原队列雪藏不管，总之是个 TODO: dirty fix。
+        # 维护一个抓图协程(池/队列?),中途退出后下个地图换新队列，原队列雪藏不管。
+        # 总之是个 TODO: dirty fix,请把它弄明白并予以改善。
+        # 当前问题：ctrl+c后不会扰乱后续地图，但会在所有地图抓取完成后抛出异常: 'loop closed'
+        # 调查方向：尝试向gather内传入生成器而非列表[失败，gather不能传生成器]
+        # 进一步分析： asyncio工作正常，成功发起了cancel流程并向future内传入了generatorStopException，
+        # future(visitpath)也成功catch了,我改了点代码把它们沉默掉并加入统计。
         loop = asyncio.new_event_loop()
         try:
             loop.run_until_complete(self.visitPaths(to_crawl))
@@ -593,7 +610,6 @@ class crawler():
             self.logger.warning('Will exit when other threads return.')
             return 0
         finally:
-            #loop.close() # BUG: 不行，close后下个地图无法获取。
             # BUG: 如果中途keyboard interrupt的话，DB不应commit而应该rollback.
             self.UPDConn.updateDBDates(self.today, self.total_depth, self.map_type)
             if not self.dry_run:
