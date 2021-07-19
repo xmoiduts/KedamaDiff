@@ -36,7 +36,7 @@ class wannengError(Exception):  # 练习写个异常？
     def __str__(self):
         return repr(self.value)
 
-
+'''
 class threadsafe_generator():  # 解决多个线程同时抢占一个生成器导致的错误，乖乖排队去吧您们
     def __init__(self, gen):
         self.gen = gen
@@ -48,6 +48,7 @@ class threadsafe_generator():  # 解决多个线程同时抢占一个生成器�
     def next(self):
         with self.lock:
             return next(self.gen)
+'''
 
 class MapTypeHelper():
     ''' 匹配不同地图的URL路径参数
@@ -84,7 +85,7 @@ class counter():
 
 class crawler():
     # 针对(单张地图,单级缩放)的图块抓取器
-    def __init__(self, config, noFetch=False): # TODO: config -> map_config
+    def __init__(self, map_conf, noFetch=False): 
         """
         初始化图片抓取器
 
@@ -98,12 +99,12 @@ class crawler():
         '''文件/路径设置'''
         '''一个正确的链接,overviewer版 https://map.nyaacat.com/kedama/v2_daytime/0/3/3/3/3/3/3/2/3/2/3/1.jpg?c=1510454854'''
         '''mapcrafter版： https://map.nyaacat.com/kedama/v3_daytime/tl/3/2/2/2/2/2/4.jpg'''
-        self.map_domain = config.map_domain  # Overviewer地图地址
-        self.map_name = config.map_name  # 地图名称
+        self.map_domain = map_conf.map_domain  # Overviewer地图地址
+        self.map_name = map_conf.map_name  # 地图名称
         # sometimes destination map will rename, we can choose a fixed name for them to save.
-        self.map_savename = self.map_name if 'map_savename' not in config else config.map_savename
+        self.map_savename = self.map_name if 'map_savename' not in map_conf else map_conf.map_savename
         
-        self.image_folder = '{}/{}/images/{}'.format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 图块存哪
+        #self.image_folder = '{}/{}/images/{}'.format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 图块存哪 TODO: deprecate
         self.data_folder  = '{}/{}/data/{}'  .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 更新历史存哪（以后升级数据库？）
         self.log_folder  =  '{}/{}/log/{}'   .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 日志文件夹
 
@@ -119,19 +120,23 @@ class crawler():
         self.UPDConn = UpdateHistoryDBConn(self.logger)
         self.UPDConn.prepare(self.data_folder, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_folders) 
 
+        '''配置“图库管理器”'''
+        from util.file_operator import ImageManager
+        self.imgMgr = ImageManager(self.logger, 'local', CrConf.project_root, CrConf.data_folders, self.map_savename)
+        self.imgMgr.setDefaultWritePathDate(self.today)
 
         '''抓取设置'''
         print('pre-dbconn')
         self.map_type = self.probeMapType() if not noFetch else self.UPDConn.getMapLastProbedRenderer() #渲染器种类 # BUG: 此时还未产生数据库连接,是否将UPDConn提前到这里？
-        self.map_rotation = config.map_rotation if 'map_rotation' in config else 'tl'
-        self.max_crawl_workers = config.max_crawl_workers  # 最大抓图线程数
+        self.map_rotation = map_conf.map_rotation if 'map_rotation' in map_conf else 'tl'
+        self.max_crawl_workers = map_conf.max_crawl_workers  # 最大抓图线程数
         # 缩放级别总数 
         self.total_depth = self.UPDConn.getMapLastProbedDepth() if noFetch == True else self.fetchTotalDepth()# BUG: 此时还无DB Conn
         self.logger.info('map type: {}; total depth: {}'.format(self.map_type, self.total_depth))
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
-        self.target_depth = config.target_depth
+        self.target_depth = map_conf.target_depth
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
-        self.crawl_zones = ast.literal_eval(config.crawl_zones)
+        self.crawl_zones = ast.literal_eval(map_conf.crawl_zones)
         self.dry_run = False # In dry-run mode, neither commit DB nor save image file, while logs are permitted.
 
     def probeMapType(self):
@@ -229,6 +234,7 @@ class crawler():
                 img = await response.read()
             return {'headers': response.headers, 'image': img}
 
+    '''
     def getSavedImage(self, file_name, date): # , DBconn
         #      getSavedImage(self, file_name, date, type = self.getMapStorageType <或fallback什么的>, tolerance = 1 <调用深度<=2 >)
         # An open()able image patch getter that can: 
@@ -244,14 +250,7 @@ class crawler():
         elif img_storage_type == 'S3':
             pass
         # TODO: 如果S3失败则转入Local,如果local失败则raise。
-
-    def saveImage(self, file_name): 
-        # save to:
-        # [s3_bucket/local_root]/{data_folders}/images/{map_savename}/{date}/{file_name}
-        # map_savename, date and [storage_type] included in self;
-        # TODO: Local file + directory not established = mkdir + save
-        # TODO: implement this
-        pass
+    '''
 
 #--------Kedamadiff-internal-path generator-------
 
@@ -369,15 +368,16 @@ class crawler():
         self.logger.info("Total zoom depth: {}".format(depth))
         return depth
 
-    def getImgdir(self, dir):
+    '''
+    def getImgdir(self, dir): # TODO: move to iamge saver TODO: deprecate this.
         """返回保存该地图今日更新了的图块的文件夹地址
         
         保存每张图片前都会检查，若文件夹不存在将被创建。
 
-        Args: Eg. : (.)'/images/v2_daytime'
+        Args: Eg. : (.)'../images/v2_daytime'
             dir(str) : Where all images are saved.
 
-        Yields: Eg. : (.)'/images/v2_daytime/20180202/'
+        Yields: Eg. : (.)'../images/v2_daytime/20180202/'
             new_dir (str) : Where to save the images being crawled today."""
 
         new_dir = '{}/{}/'.format(dir, self.today)
@@ -388,7 +388,8 @@ class crawler():
                 self.logger.info('Made directory\t./{}'.format(new_dir))
             yield new_dir
 
-    '''，，一轮完成而不是先head再get'''      
+    #，，一轮完成而不是先head再get     
+    '''
 
 
     async def processBySHA1(self, sess, URL, response, file_name, coord):
@@ -426,7 +427,8 @@ class crawler():
 
         # Calculate SHA1 from saved image patches.
         try:
-            Prev_img = self.getSavedImage(file_name, self.UPDConn.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
+            #Prev_img = self.getSavedImage(file_name, self.UPDConn.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
+            Prev_img = self.imgMgr.retrieveImage(self.UPDConn.getLatestUpdateDate(file_name), file_name)
             prev_img_SHA1 = hashlib.sha1(Prev_img).hexdigest()
         except FileNotFoundError: # Also happenes when isAdd == True; TODO: change in Object-Storage mode
             self.logger.warning('File\t{} inexist'.format(file_name))
@@ -458,9 +460,13 @@ class crawler():
             self.UPDConn.addCrawlRecord(
                 file_name, self.today, response.headers['ETag'], 
                 self.target_depth, coord[0], coord[1])
-            with open(self.save_in.next()+file_name, 'wb') as f: # TODO: save_image(), keep aware of dry-run and OSS
+            '''
+            with open(self.save_in.next()+file_name, 'wb') as f: # TODO: save_image(), keep aware of dry-run and OSS; TODO: move to save_images
                     f.write(DL_img)
                     f.close()
+            '''
+            self.imgMgr.saveImage(None, file_name, DL_img)
+
         else:
             # SHA1一致，图片无实质性变化，则忽略该不同(nMod)
             # file_name is guaranteed to have record.
@@ -543,7 +549,6 @@ class crawler():
                 return ret_msg
             except (KeyboardInterrupt) as e:
                 raise e
-            
             except RuntimeError as e:
                 # 任务取消
                 if 'Event loop is closed' in str(e):
@@ -588,8 +593,8 @@ class crawler():
         self.latest_ETag = None # 每个区块的最新ETag
 
 
-        save_in = self.getImgdir(self.image_folder)
-        self.save_in = threadsafe_generator(save_in)
+        #save_in = self.getImgdir(self.image_folder) # TODO: deprecate this
+        #self.save_in = threadsafe_generator(save_in) #TODO: move
 
         # Image update history DB read in self.__init__() .
 
@@ -614,7 +619,7 @@ class crawler():
             self.UPDConn.updateDBDates(self.today, self.total_depth, self.map_type)
             if not self.dry_run:
                 self.logger.debug('Start saving DB at {}'.format(time.time()))
-                self.UPDConn.commit()
+                self.UPDConn.commit() # BUG/ISSUE: should we commit/rollback DB on keyboardinterrupt?
             else:
                 self.logger.debug('Discarded DB changes in dry-run mode')
             self.UPDConn.close() # BUG: ctrl+c close后，下张地图新初始化的DBConn带有上一个(首个)地图名称。
