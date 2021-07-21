@@ -11,7 +11,8 @@ import os
 
 class ImageManager():
     # local 必选，S3 可选
-    def __init__(self, logger, storage_type, project_root, data_folders, map_savename):
+    # todo: 读写路径不一致怎么办
+    def __init__(self, logger, storage_type, project_root, data_foldersR, map_savename):
         if logger: self.logger = logger
         else: 
             self.logger = logging.getLogger()
@@ -19,7 +20,7 @@ class ImageManager():
         self.proj_root = project_root
         assert storage_type in ['local', 'S3']
         self.preferred_storage_type = storage_type
-        self.image_read_path = '{}/images/{}'.format(data_folders, map_savename) # 'data-dev/images/v2_daytime', 此path缺root
+        self.image_read_path = '{}/images/{}'.format(data_foldersR, map_savename) # 'data-dev/images/v2_daytime', 此path缺root
         self.default_write_path = None
         self.S3_enabled = False
 
@@ -27,16 +28,16 @@ class ImageManager():
         raise NotImplementedError
         self.S3_enabled = True
 
-    def setDefaultWritePathDate(self, today):
+    def setDefaultWritePath(self, path):
         # set self.default_path, which is the default image saving location\
         # ...if path is not explicitedly given in saveImage() method.
         # a typical path: 'data-dev/images/v2_daytime/20180202'
-        self.default_write_path = '{}/{}'.format(self.image_read_path, today) # 此path缺root
-        self.logger.info('img write path set to {}'.format(today))
+        self.default_write_path = path # 此path缺root BUG: read/write path不一致怎么办
+        self.logger.info('img write path set to [{}]'.format(self.default_write_path))
     
     def saveImage(self, path, file_name, image):
         # save to:
-        # [{project_root}/{data_folders}/images/{map_savename}/{date}]/{file_name}
+        # [{project_root}/{data_foldersW}/images/{map_savename}/{date}]/{file_name}
         # why not save to S3? 'cause network interruption. Save locally and upload afterwards.
         # test if target directory exists, create if inexist.
         # TODO: what if disk is full?

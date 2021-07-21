@@ -104,9 +104,9 @@ class crawler():
         # sometimes destination map will rename, we can choose a fixed name for them to save.
         self.map_savename = self.map_name if 'map_savename' not in map_conf else map_conf.map_savename
         
-        #self.image_folder = '{}/{}/images/{}'.format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 图块存哪 TODO: deprecate
-        self.data_folder  = '{}/{}/data/{}'  .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 更新历史存哪（以后升级数据库？）
-        self.log_folder  =  '{}/{}/log/{}'   .format(CrConf.project_root, CrConf.data_folders, self.map_savename)  # 日志文件夹
+        #self.image_folder = '{}/{}/images/{}'.format(CrConf.project_root, CrConf.data_foldersW, self.map_savename)  # 图块存哪 TODO: deprecate
+        self.data_folder  = '{}/{}/data/{}'  .format(CrConf.project_root, CrConf.data_foldersW, self.map_savename)  # 更新历史存哪（以后升级数据库？）
+        self.log_folder  =  '{}/{}/log/{}'   .format(CrConf.project_root, CrConf.data_foldersW, self.map_savename)  # 日志文件夹
 
         os.environ['TZ'] = CrConf.timezone #保留这行 毕竟在Linux里还会用，能让日志日期正确。
         self.today = datetime.now(pytz.timezone(CrConf.timezone)).strftime('%Y%m%d')
@@ -118,12 +118,12 @@ class crawler():
         # 读取图块更新史，若文件不存在则连带所述目录一同创建。
         from util.update_history_DBConn import UpdateHistoryDBConn
         self.UPDConn = UpdateHistoryDBConn(self.logger)
-        self.UPDConn.prepare(self.data_folder, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_folders) 
+        self.UPDConn.prepare(self.data_folder, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_foldersW) 
 
         '''配置“图库管理器”'''
         from util.file_operator import ImageManager
-        self.imgMgr = ImageManager(self.logger, 'local', CrConf.project_root, CrConf.data_folders, self.map_savename)
-        self.imgMgr.setDefaultWritePathDate(self.today)
+        self.imgMgr = ImageManager(self.logger, 'local', CrConf.project_root, self.UPDConn.getMapDatapath() or CrConf.data_foldersW, self.map_savename) # if datapath in DB then use DB version else (new DB) use config version
+        self.imgMgr.setDefaultWritePath(CrConf.data_foldersW + '/images/' + self.map_savename + '/' + self.today)
 
         '''抓取设置'''
         print('pre-dbconn')
@@ -650,7 +650,7 @@ def main():
         #f.truncate()
     except Exception as e:
         print(e)        
-        with open('{}/{}/log/errors.txt'.format(CrConf.project_root, CrConf.data_folders),'a+') as f:
+        with open('{}/{}/log/errors.txt'.format(CrConf.project_root, CrConf.data_foldersW),'a+') as f:
             print(str(e),file = f)
         bot = Bot(token = CrConf.telegram_bot_key )
         bot.send_message(CrConf.telegram_msg_recipient,'Something went wrong, see logs/errors.txt for detail')

@@ -2,7 +2,7 @@ import sqlite3
 import os
 import logging
 
-# 是否要单例模式？
+# TODO: 是否要单例模式？
 
 
 class UpdateHistoryDBConn():
@@ -17,6 +17,8 @@ class UpdateHistoryDBConn():
         # Create DB file path if not exist
         # Create DB Tables and headers on DB file creation.
         # TODO: testcase: data_folderR != data_folderW
+        # data_folder_R = {project_root}/{config.data_folders}/data/{map_savename}
+        # data_folder_W = {config.data_folders}
         try:
             self.sqliteConnection = sqlite3.connect(
                 '{}/crawl_records.sqlite3'.format(data_folderR)) # Its '.' path is set to the path of calling module(crawl.py...).
@@ -31,7 +33,7 @@ class UpdateHistoryDBConn():
             self.sqliteConnection = sqlite3.connect(
                 '{}/crawl_records.sqlite3'.format(data_folderR))
         self.logger.info(
-            'Connected to {}/crawl_records.sqlite3'.format(data_folderR))
+            'Connected to [{}]/crawl_records.sqlite3'.format(data_folderR))
 
         # init tables with headers.
         cursor = self.sqliteConnection.cursor()
@@ -186,6 +188,8 @@ class UpdateHistoryDBConn():
         )
 
     def updateETag(self, file_name, date, ETag):
+        # BUG/Feature: updating ETag of a history image will affest its crawl status...
+        #   if we crawl once, delete the new record and crawl again same day.
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             UPDATE crawl_records
