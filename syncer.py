@@ -26,36 +26,35 @@ def generateFilePath(dir, having):
         root_norm = root.replace('\\','/') # 'proj_root/root/path1/path2/...'
         sub_root_norm = '/'.join(root_norm.split('/')[1:]) # 'path1/path2/...'
         for file_name in file_names:
-            src = '/'.join([root_norm, file_name])
-            dst = '/'.join([sub_root_norm, file_name])
-            if having in src: yield src, dst
+            local = '/'.join([root_norm, file_name])
+            remote = '/'.join([sub_root_norm, file_name])
+            if having in local: yield local, remote
             else: continue
-            #print(src, ' | ', dst)
+            #print(local, ' | ', remote)
             #break
 
-def uploadImageToS3(src_dst):
-    src, dst = src_dst[0], src_dst[1]
+def uploadImageToS3(L_R):
+    local, remote = L_R[0], L_R[1]
     client.upload_file( 
-        src,
+        local,
         'kedamadiff-project',
-        dst,
+        remote,
         ExtraArgs={ 
             'ContentType': 'image/jpeg',
             'ContentDisposition': 'inline',
             'ACL': 'public-read'
         }
     )
-    print(src, ' uploaded')
+    print(local, '\tuploaded')
     # TODO: 503 slow down: 指数回退
-    # TODO: 上传成功后将src加入待删列表，以供后续删除
-
+    # TODO: 上传成功后将local加入待删列表，以供后续删除
 
  
 def sync(root, dir_from_root, having=''):
     # sync all files in dir having 'having' substring in their paths.
     # root: project root, e.g.: '..'
     # WARNING NOTE: 使用concurrent做并发非我本意，实为还没用过async boto3;以后你要每秒并发加载上百张图片，concurrent.futures或许会太浪费/低效了吧
-    with ThreadPoolExecutor(max_workers=5) as exec:
+    with ThreadPoolExecutor(max_workers=200) as exec:
         try:
             for msg in exec.map(
                 uploadImageToS3, 

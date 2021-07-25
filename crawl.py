@@ -13,7 +13,7 @@ import pytz
 from datetime import datetime
 #from functools import reduce
 from telegram import Bot
-from configs.config import CrawlerConfig as CrConf
+from configs.config import CrawlerConfig as CrConf, S3Config
 from configs.crawl_list import CrawlList as map_list
 
 import requests
@@ -119,14 +119,15 @@ class crawler():
         from util.update_history_DBConn import UpdateHistoryDBConn
         self.UPDConn = UpdateHistoryDBConn(self.logger)
         self.UPDConn.prepare(self.data_folder, self.map_name, self.map_savename, CrConf.storage_type, CrConf.data_foldersW) 
+        self.logger.info('Update_history DB connected')
 
         '''配置“图库管理器”'''
         from util.file_operator import ImageManager
-        self.imgMgr = ImageManager(self.logger, 'local', CrConf.project_root, self.UPDConn.getMapDatapath() or CrConf.data_foldersW, self.map_savename) # if datapath in DB then use DB version else (new DB) use config version
+        self.imgMgr = ImageManager(self.logger, 'S3', CrConf.project_root, self.UPDConn.getMapDatapath() or CrConf.data_foldersW, self.map_savename) # if datapath in DB then use DB version else (new DB) use config version
         self.imgMgr.setDefaultWritePath(CrConf.data_foldersW + '/images/' + self.map_savename + '/' + self.today)
+        self.imgMgr.addS3Info(S3Config)
 
         '''抓取设置'''
-        print('pre-dbconn')
         self.map_type = self.probeMapType() if not noFetch else self.UPDConn.getMapLastProbedRenderer() #渲染器种类 # BUG: 此时还未产生数据库连接,是否将UPDConn提前到这里？
         self.map_rotation = map_conf.map_rotation if 'map_rotation' in map_conf else 'tl'
         self.max_crawl_workers = map_conf.max_crawl_workers  # 最大抓图线程数
@@ -428,9 +429,10 @@ class crawler():
         # Calculate SHA1 from saved image patches.
         try:
             #Prev_img = self.getSavedImage(file_name, self.UPDConn.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
-            Prev_img = self.imgMgr.retrieveImage(self.UPDConn.getLatestUpdateDate(file_name), file_name)
+            Prev_img = await self.imgMgr.aRetrieveImage(self.UPDConn.getLatestUpdateDate(file_name), file_name)
             prev_img_SHA1 = hashlib.sha1(Prev_img).hexdigest()
         except FileNotFoundError: # Also happenes when isAdd == True; TODO: change in Object-Storage mode
+            # if file not found then use crawled one.
             self.logger.warning('File\t{} inexist'.format(file_name))
             prev_img_SHA1 = 'G'
         finally:

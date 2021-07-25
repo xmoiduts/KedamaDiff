@@ -9,11 +9,15 @@ import logging
 import os
 
 
+
+
+
 class ImageManager():
     # local 必选，S3 可选
     # todo: 读写路径不一致怎么办
     def __init__(self, logger, storage_type, project_root, data_foldersR, map_savename):
-        if logger: self.logger = logger
+        if logger: 
+            self.logger = logger
         else: 
             self.logger = logging.getLogger()
             self.logger.warning('logger not specified, using backup default logger.')
@@ -23,10 +27,23 @@ class ImageManager():
         self.image_read_path = '{}/images/{}'.format(data_foldersR, map_savename) # 'data-dev/images/v2_daytime', 此path缺root
         self.default_write_path = None
         self.S3_enabled = False
+        self.tExecutor = None # placeholder that avoids variable-inexist-exception.
 
     def addS3Info(self, S3_config):
-        raise NotImplementedError
+        #raise NotImplementedError
+        
+        import boto3
+        
+        self.S3_session = boto3.session.Session()
+        self.S3_client  = self.S3_session.client(
+            's3',
+            region_name = S3_config.region_name,
+            endpoint_url = S3_config.endpoint_url,
+            aws_access_key_id = S3_config.RW_key,
+            aws_secret_access_key = S3_config.RW_secret
+        )
         self.S3_enabled = True
+
 
     def setDefaultWritePath(self, path):
         # set self.default_path, which is the default image saving location\
@@ -36,7 +53,7 @@ class ImageManager():
         self.logger.info('img write path set to [{}]'.format(self.default_write_path))
     
     def saveImage(self, path, file_name, image):
-        # save to:
+        # save to local file system location:
         # [{project_root}/{data_foldersW}/images/{map_savename}/{date}]/{file_name}
         # why not save to S3? 'cause network interruption. Save locally and upload afterwards.
         # test if target directory exists, create if inexist.
@@ -67,12 +84,36 @@ class ImageManager():
             try:
                 img = getter(date, file_name)
                 if img: return img
-            except FileNotFoundError: continue
+            except FileNotFoundError: 
+                self.logger.warning("File {}/{} not found in {}.".format(
+                    date, file_name, getter)) 
+                continue
         raise FileNotFoundError
 
+    async def aRetrieveImage(self, date:str, file_name:str):
+        # asynchronize the blocking method `retrieveImage`.
+
+        import asyncio
+        #import aiohttp
+        from concurrent.futures import ThreadPoolExecutor
+        if not self.tExecutor:
+            self.tExecutor = ThreadPoolExecutor(max_workers = 50)
+        loop = asyncio.get_running_loop()
+        img = await asyncio.gather(loop.run_in_executor(self.tExecutor, self.retrieveImage, date, file_name))
+        return img[0]
+
+    def cleanUp(self):
+        if self.tExecutor:
+            self.tExecutor.shutdown()
+
     def getImageS3(self, date:str, file_name:str):
-        raise FileNotFoundError
+        #raise FileNotFoundError
         assert self.S3_enabled 
+        remote = '{}/{}/{}'.format(self.image_read_path, date, file_name)
+        from io import BytesIO
+        local_buffer = BytesIO()
+        self.S3_client.download_fileobj('kedamadiff-project', remote, local_buffer)
+        return local_buffer.read()
 
     def getImageLocal(self, date:str, file_name:str):
         with open('{}/{}/{}/{}'.format(self.proj_root, self.image_read_path, date, file_name), 'rb') as f:
