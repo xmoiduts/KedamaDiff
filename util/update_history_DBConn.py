@@ -47,8 +47,8 @@ class UpdateHistoryDBConn():
                 zoom_level INTEGER NOT NULL,
                 coord_x INTEGER NOT NULL,
                 coord_y INTEGER NOT NULL,
-                frozen boolean DEFAULT False,
-                deleted boolean DEFAULT False
+                frozen boolean DEFAULT 0,
+                deleted boolean DEFAULT 0
 	        )'''
         )
         #    table: map_attributes: init once, never updates (unless manually)
@@ -118,7 +118,7 @@ class UpdateHistoryDBConn():
         cursor.execute('''
             SELECT {}, crawled_at
             FROM crawl_records
-            WHERE file_name = ? AND deleted IS "False"
+            WHERE file_name = ? AND not deleted
             ORDER BY crawled_at DESC
             LIMIT 1
         '''.format(item), (file_name,) 
@@ -137,6 +137,7 @@ class UpdateHistoryDBConn():
         return None if retrieved == None else retrieved[0] # TODO: 同上
 
     def getMapLastProbedDepth(self):
+        # not accessed as noFetch is set to False
         retrieved = self.getMapAttr('last_update', 'total_depth') #TODO
         if retrieved == None: raise ValueError('No recorded crawled depth information')
         return retrieved[0]
@@ -146,6 +147,7 @@ class UpdateHistoryDBConn():
 
 
     def getMapLastProbedRenderer(self):
+        # not accessed as noFetch is set to False
         retrieved = self.getMapAttr('last_update', 'renderer') #TODO
         if retrieved == None: raise ValueError('No renderer recorded')
         return retrieved[0]
@@ -166,10 +168,10 @@ class UpdateHistoryDBConn():
         cursor = self.sqliteConnection.cursor()
         cursor.execute('''
             UPDATE crawl_records
-            SET deleted = "True"
+            SET deleted = 1
             WHERE file_name = ?
                 AND crawled_at = ?
-                AND deleted IS "False"
+                AND not deleted
         ''',(file_name, date) 
         )
         if cursor.rowcount != 1:
@@ -196,7 +198,7 @@ class UpdateHistoryDBConn():
             SET ETag = ?
             WHERE file_name = ?
                 AND crawled_at = ?
-                AND deleted IS "False"
+                AND not deleted
         ''',(ETag, file_name, date) 
         )
         if cursor.rowcount != 1:

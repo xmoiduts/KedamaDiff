@@ -10,22 +10,22 @@ print(os.getcwd())
 
 
 
-for map_name in ['v1_daytime', 'v4']:
+for map_savename in ['v1_daytime']:
     try:
         sqliteConnection = sqlite3.connect(
-        "../data-dev/data/{}/crawl_records.db".format(map_name))
+        "../data-dev/data/{}/crawl_records.sqlite3".format(map_savename))
         cursor = sqliteConnection.cursor()
         cursor.execute('''
             CREATE TABLE crawl_records(
-                file_name varchar(100) NOT NULL,
+                file_name varchar(40) NOT NULL,
                 crawled_at varchar(8) NOT NULL,
                 map_rotation varchar(2), 
                 ETag varchar(30) NOT NULL, 
                 zoom_level INTEGER NOT NULL,
                 coord_x INTEGER NOT NULL,
-                coord_y INTEGET NOT NULL,
-                frozen boolean DEFAULT False,
-                deleted boolean DEFAULT False
+                coord_y INTEGER NOT NULL,
+                frozen boolean DEFAULT 0,
+                deleted boolean DEFAULT 0
 	        )'''
         )
         cursor.execute('''
@@ -34,9 +34,7 @@ for map_name in ['v1_daytime', 'v4']:
                 map_name varchar(30),
                 map_savename varchar(30),
                 storage_type varchar(6),
-                data_path varchar(128),
-                last_total_depth INTEGER,
-                last_update varchar(8)
+                data_path varchar(128)
             )'''
         )
 
@@ -44,17 +42,28 @@ for map_name in ['v1_daytime', 'v4']:
             INSERT INTO map_attributes
                 (id, map_savename, storage_type, data_path)
             VALUES (?,?,?,?)''',
-            (1, map_name, 'local', 'data-production')
+            (1, map_savename, 'S3', 'data-production')
+        )
+
+        cursor.execute('''
+            CREATE TABLE last_update(
+                id INTEGER PRIMARY KEY NOT NULL,
+                date varchar(8),
+                total_depth INTEGER,
+                renderer varchar(128)
+            )'''
         )
         
 
-        with open('{}/{}/update_history.json'.format('../data-production/data', map_name), 'r') as f:
+        with open('{}/{}/update_history.json'.format('../data-production/data', map_savename), 'r') as f:
             update_history = json.load(f)
+            latest_date = '00000000'
             for file_name in update_history:
                 zoom_level, coord_x, coord_y = file_name.split('.')[0].split('_')
                 for record in update_history[file_name]:
                     ETag = record['ETag']
                     crawled_at = record['Save_in'].split('/')[4]
+                    latest_date = max(crawled_at, latest_date)
                     stored_at = '/'.join(record['Save_in'].split('/')[2:])
                     #print(record)
                     #print(file_name, crawled_at, ETag, zoom_level, coord_x, coord_y, stored_at)
@@ -64,6 +73,12 @@ for map_name in ['v1_daytime', 'v4']:
                     VALUES (?,?,?,?,?,?)''', 
                     (file_name, crawled_at, ETag, zoom_level, coord_x, coord_y) )
                 #time.sleep(0.2)
+            cursor.execute('''
+                INSERT INTO last_update
+                (id, date, total_depth, renderer)
+                VALUES (?,?,?,?)''',
+                (1, latest_date, 0, 'Overviewer')
+            )
             sqliteConnection.commit()
     finally:
         if (sqliteConnection):
