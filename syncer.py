@@ -1,5 +1,6 @@
-# recursively upload files in image folders to S3-compatible services
+# recursively upload files in image folders to S3(-compatible services)
 # (optional: ) and delete source files upon upload success.
+# TODO: upload (compressed) data to S3.
 
 import boto3
 import os

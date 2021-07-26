@@ -8,6 +8,8 @@
 import logging
 import os
 
+from botocore.exceptions import ClientError
+
 
 
 
@@ -33,6 +35,7 @@ class ImageManager():
         #raise NotImplementedError
         
         import boto3
+        from botocore.exceptions import ClientError
         
         self.S3_session = boto3.session.Session()
         self.S3_client  = self.S3_session.client(
@@ -83,10 +86,11 @@ class ImageManager():
         for getter in image_getters: # attempt to get image from various ways.
             try:
                 img = getter(date, file_name)
+                #self.logger.debug("File {}/{} by {} is img with length {}.".format(date, file_name, getter, len(img)))
                 if img: return img
             except FileNotFoundError: 
                 self.logger.warning("File {}/{} not found in {}.".format(
-                    date, file_name, getter)) 
+                    date, file_name, getter.__name__)) 
                 continue
         raise FileNotFoundError
 
@@ -97,7 +101,7 @@ class ImageManager():
         #import aiohttp
         from concurrent.futures import ThreadPoolExecutor
         if not self.tExecutor:
-            self.tExecutor = ThreadPoolExecutor(max_workers = 50)
+            self.tExecutor = ThreadPoolExecutor(max_workers = 20)
         loop = asyncio.get_running_loop()
         img = await asyncio.gather(loop.run_in_executor(self.tExecutor, self.retrieveImage, date, file_name))
         return img[0]
@@ -110,10 +114,16 @@ class ImageManager():
         #raise FileNotFoundError
         assert self.S3_enabled 
         remote = '{}/{}/{}'.format(self.image_read_path, date, file_name)
+        #self.logger.debug('S3 getter accessing {}'.format(remote))
         from io import BytesIO
         local_buffer = BytesIO()
-        self.S3_client.download_fileobj('kedamadiff-project', remote, local_buffer)
-        return local_buffer.read()
+        try:
+            self.S3_client.download_fileobj('kedamadiff-project', remote, local_buffer)
+            local_buffer.seek(0)
+            return local_buffer.read()
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404': raise FileNotFoundError
+            else: raise e
 
     def getImageLocal(self, date:str, file_name:str):
         with open('{}/{}/{}/{}'.format(self.proj_root, self.image_read_path, date, file_name), 'rb') as f:
