@@ -429,9 +429,13 @@ class crawler():
         # Calculate SHA1 from saved image patches.
         try:
             #Prev_img = self.getSavedImage(file_name, self.UPDConn.getLatestUpdateDate(file_name)) # BUGFIX: 改成这个文件的last_update 日期
+            # BUG: S3 mode + crawl new map = fail.
             Prev_img = await self.imgMgr.aRetrieveImage(self.UPDConn.getLatestUpdateDate(file_name), file_name)
             prev_img_SHA1 = hashlib.sha1(Prev_img).hexdigest()
-        except FileNotFoundError: # Also happenes when isAdd == True; TODO: change in Object-Storage mode
+        except FileNotFoundError: 
+            # This code block executes on Image retrival failure 
+            # \or target (dateless) filename occurs 1st time in DB. 
+            # NOTE: “我看不到就是没更新”，不应该是这样吗？
             # if file not found then use crawled one.
             self.logger.warning('File\t{} inexist'.format(file_name))
             prev_img_SHA1 = 'G'
@@ -529,9 +533,23 @@ class crawler():
                         # ETag不一致--丢给下一级处理 ((Add,)Upd, nMod, rep)
                         if r.headers['ETag'] != self.UPDConn.getLatestSavedETag(file_name): 
                             visitpath_status = 'ETag inconsistent'
+                            self.logger.debug(
+                                "ETag of {}: {} vs. {}".format(
+                                    file_name, 
+                                    r.headers['ETag'], 
+                                    self.UPDConn.getLatestSavedETag(file_name)
+                                )
+                            )
                             ret_msg = await self.processBySHA1(sess, URL, r, file_name, XY)
                         # ETag一致--只出个log
                         else:
+                            self.logger.debug(
+                                "ETag of {}: {} vs. {}".format(
+                                    file_name, 
+                                    r.headers['ETag'], 
+                                    self.UPDConn.getLatestSavedETag(file_name)
+                                )
+                            )
                             visitpath_status = 'ETag consistent'
                             self.statistics.plus('Ignore')
                             ret_msg = 'Ign\t{}'.format(file_name)
@@ -556,7 +574,7 @@ class crawler():
                 if 'Event loop is closed' in str(e):
                     self.statistics.plus('Cancel')
                     ret_msg = 'Cancel\t{}'.format(path)
-                    self.logger.debug(ret_msg)
+                    #self.logger.debug(ret_msg)
                     return ret_msg
                 else:
                     raise e
