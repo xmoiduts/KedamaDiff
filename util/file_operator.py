@@ -45,6 +45,7 @@ class ImageManager():
             aws_access_key_id = S3_config.RW_key,
             aws_secret_access_key = S3_config.RW_secret
         )
+        self.S3_bucket_name = S3_config.bucket_name
         self.S3_enabled = True
 
 
@@ -118,7 +119,7 @@ class ImageManager():
         from io import BytesIO
         local_buffer = BytesIO()
         try:
-            self.S3_client.download_fileobj('kedamadiff-project', remote, local_buffer)
+            self.S3_client.download_fileobj(self.S3_bucket_name, remote, local_buffer) # TODO, bucket name goes configurable
             local_buffer.seek(0)
             return local_buffer.read()
         except ClientError as e:
