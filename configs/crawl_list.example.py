@@ -1,41 +1,36 @@
 #备注: 给每个地图单开一个class非我所愿，我希望使用`.`来访问地图对象中的元素。
-# Usage: fill in maps and left other values 'as is'
+# Usage: fill in maps and left other classes 'as is'
 
 maps =  {
     "v1_daytime": {
         "crawl_zones": "[((0, -8), 10, 10)]",
         "enable_crawl": False,
-        "last_total_depth": 10,
-        "latest_renderer": "Mapcrafter",
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v1", # In the long run, map's URL name may change, ...
-        "map_rotation": "tl",
+        "map_rotation": "tl", # preserved for mapcrafter
         "map_savename": "v1_daytime", # ... while we can keep a consistent name for where we save the map, 'savename' are meant to be unchanged.
-        "max_crawl_workers": 16,
-        "note": "[((0, -8), 80, 40)]",
+        "max_crawl_workers": 4, # 2-8 workers for this single-threaded aiohttp script is enough.
+        "note": "[((0, -8), 80, 40)]", # free text, not used by the script executable.
         "target_depth": -3
     },
     "v2_daytime": {
         "crawl_zones": "[((0, -8), 80, 40)]",
         "enable_crawl": False,
-        "last_total_depth": 13,
         "latest_renderer": "Mapcrafter",
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v2",
         "map_rotation": "tl",
         "map_savename": "v2_daytime",
-        "max_crawl_workers": 16,
+        "max_crawl_workers": 4,
         "target_depth": -3
     },
     "v4_daytime": {
         "crawl_zones": "[((8, 520), 10, 10)]",
         "enable_crawl": True,
-        "last_total_depth": 11,
-        "latest_renderer": "Mapcrafter",
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v4",
         "map_rotation": "tl",
-        "max_crawl_workers": 24,
+        "max_crawl_workers": 8,
         "note": "[((0, 0), 140, 70)]",
         "target_depth": -3
     }
