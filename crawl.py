@@ -304,6 +304,7 @@ class crawler():
             tmp = tmp_X * 2 + tmp_Y
             path += table[tmp]
         return path
+        # BUG: 如果某点无法作为任何图片的中心点呢？例如(3,2)
 
     def path2xy(self, path, depth):
         """由图块路径转项目定义的坐标。

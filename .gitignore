@@ -14,3 +14,4 @@ configs/crawl_list.py
 config_hide.json
 
 *.sqbpro
+test_imagemanager.py
