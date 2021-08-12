@@ -57,3 +57,10 @@ data folder have 3 sub-folders:
 - images (saved images)
 - log (log)
 
+# ToDo 设想一瞥
+
+此处放置了曾经已实现的 joiner（拼图器）所生产的图片，笔者希望藉此展示自己想做的内容。
+
+[diff出的图片（5MB）](https://kedamadiff-project.fra1.digitaloceanspaces.com/image-host/image-host/demo/v2_-3_%28%280,%20-8%29,%2056,%2029%29_20180609_to_20180709.jpg) （Diff:ed world map, 5MB）
+
+[仅进行拼接的v2全图 **警告，非常大80MB**](https://kedamadiff-project.fra1.digitaloceanspaces.com/image-host/image-host/demo/v2_daytime_-3_%28%280,%20-8%29,%2056,%2030%29_20180911.jpg) (World map, joined only, WARNING: very large, 80MB)
