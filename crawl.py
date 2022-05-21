@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from tkinter import E
+#from tkinter import E
 import pytz
 from datetime import datetime
 #from functools import reduce
