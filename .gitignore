@@ -7,3 +7,9 @@ configs/config.py
 configs/crawl_list.py
 
 *.sqbpro
+test_imagemanager.py
+
+sketchbook.pptx
+folium_test.py
+index_manual_tweak.html
+targetSite/*

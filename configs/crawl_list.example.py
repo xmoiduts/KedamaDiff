@@ -8,10 +8,12 @@ maps =  {
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v1", # In the long run, map's URL name may change, ...
         "map_rotation": "tl", # preserved for mapcrafter
-        "map_savename": "v1_daytime", # ... while we can keep a consistent name for where we save the map, 'savename' are meant to be unchanged.
+        "map_savename": "v1", # ... while we can keep a consistent name for where we save the map, 'savename' are meant to be unchanged.
         "max_crawl_workers": 4, # 2-8 workers for this single-threaded aiohttp script is enough.
         "note": "[((0, -8), 80, 40)]", # free text, not used by the script executable.
-        "target_depth": -3
+        "target_depth": -3,
+        "ancestor_probing_level": -3 # how many levels will crawler probe the existence for a given tile path? ...
+        #... 0 if vacant, -n means each probe determines whether to skip accessing 2**n image tiles.
     },
     "v2_daytime": {
         "crawl_zones": "[((0, -8), 80, 40)]",
@@ -20,7 +22,7 @@ maps =  {
         "map_domain": "https://map.example.com/kedama",
         "map_name": "v2",
         "map_rotation": "tl",
-        "map_savename": "v2_daytime",
+        #"map_savename": "v2_daytime",
         "max_crawl_workers": 4,
         "target_depth": -3
     },

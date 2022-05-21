@@ -9,12 +9,14 @@ import logging
 import os
 import threading
 import time
+from tkinter import E
 import pytz
 from datetime import datetime
 #from functools import reduce
 from telegram import Bot
 from configs.config import CrawlerConfig as CrConf, S3Config
 from configs.crawl_list import CrawlList as map_list
+from util.crawler_algo import ancestorOf
 
 import requests
 import urllib3
@@ -66,7 +68,8 @@ class MapTypeHelper():
 class counter():
     def __init__(self):
         self.a = {'404': 0, 'Fail': 0, 'Ignore': 0, 'Added': 0,
-                  'Update': 0, 'Replace': 0, 'unModded': 0, 'Cancel': 0}
+                  'Update': 0, 'Replace': 0, 'unModded': 0, 'Cancel': 0, 
+                  'Probed': 0, 'Skipped': 0}
 
     def plus(self, str):
         self.a[str] += 1
@@ -76,11 +79,11 @@ class counter():
         if self.a['Added'] != 0:
             str += 'Added:\t{}\n'.format(self.a['Added'])
         str += 'Update:\t{}\nUnmodded:\t{}\nIgnore:\t{}\n404:\t{}\nFail:\t{}\n'.format(
-            self.a['Update'], self.a['unModded'], self.a['Ignore'], self.a['404'], self.a['Fail'])
-        if self.a['Replace'] != 0:
-            str += 'Replace:\t{}\n'.format(self.a['Replace'])
-        if self.a['Cancel'] != 0:
-            str += 'Cancel:\t{}\n'.format(self.a['Cancel'])
+            self.a['Update'], self.a['unModded'], self.a['Ignore'], 
+            self.a['404'], self.a['Fail'])
+        for kw in ['Probed', 'Skipped', 'Replace', 'Cancel']:
+            if self.a[kw] != 0:
+                str += '{}:\t{}\n'.format(kw, self.a[kw])
         return str
 
 class crawler():
@@ -136,6 +139,7 @@ class crawler():
         self.logger.info('map type: {}; total depth: {}'.format(self.map_type, self.total_depth))
         # 目标图块的缩放级别,从0开始，每扩大观察范围一级-1。
         self.target_depth = map_conf.target_depth
+        self.ancestor_probing_level = map_conf.ancestor_probing_level or 0
         # 追踪变迁历史的区域， [((0, -8), 56, 29)] for  v1/v2 on Kedama server
         self.crawl_zones = ast.literal_eval(map_conf.crawl_zones)
         self.dry_run = False # In dry-run mode, neither commit DB nor save image file, while logs are permitted.
@@ -393,6 +397,74 @@ class crawler():
     #，，一轮完成而不是先head再get     
     '''
 
+    async def head_with_retries(self, sess, URL, timeout, retries):
+        # （暂时）适用于探查祖先层级图块的head方法
+        # 由于后级功能并非必须，异常处理做的相对简单。
+        tried_time = 0
+        try:
+            async with sess.head(URL, timeout = timeout) as response:
+                r = response
+            return r
+        except KeyboardInterrupt as e:
+            raise e
+        except Exception as e:
+            self.logger.warning(
+                'No.%s for\t%s\t%s', tried_time, URL, e)
+            tried_time += 1
+            if tried_time >= retries:
+                raise e
+
+    async def probeAncestorExistence(self, sess, path):
+        """检测目标图块的上几级图块是否存在
+        如果不存在，后级程序可以直接跳过对此path的图块下载行为。
+        否则说明此path应被实际加载。
+        Args:
+            sess: aiohttp.ClientSession.
+            path: the ORIGINAL path, not ancestor's.
+        Returns:
+            bool, True = Ancestor Exists; False = other scenarios.
+        """
+        # no one have ever probed this ancestor tile.
+        ancestor_path = ancestorOf(
+            path, self.ancestor_probing_level)
+        if ancestor_path not in self.ancestor_tile_existence:
+            try:
+                self.ancestor_tile_existence[ancestor_path] = 'Probing'
+                URL = '{}/{}{}.jpg?c={}'.format(self.map_domain,
+                                    self.map_name, ancestor_path, 
+                                    self.timestamp)
+                r = await self.head_with_retries(
+                    sess, URL, 
+                    timeout=CrConf.crawl_request_timeout, 
+                    retries=CrConf.crawl_request_retries)
+                self.statistics.plus('Probed')
+                if r.status == 404:
+                    self.ancestor_tile_existence[ancestor_path] = False
+                    self.logger.info("Tiles w/ prefix %s inexists", ancestor_path)
+                    return False
+                elif r.status == 200:
+                    self.ancestor_tile_existence[ancestor_path] = True
+                    return True
+            except KeyboardInterrupt as e: 
+                self.ancestor_tile_existence[ancestor_path] = 'Probe-cancelled'
+                raise e
+            except Exception as e:
+                self.ancestor_tile_existence[ancestor_path] = 'Probe-failed'
+                self.logger.warning("Failed to probe ancestor existence: %s ",
+                                    path)
+                return True
+        # someone has probed ancestor, but result 
+        else:
+            while self.ancestor_tile_existence[ancestor_path] is 'Probing':
+                await asyncio.sleep(0.1) # TODO: exponential backoff
+        # now ancestor is probed or probing-failed
+        # probed, ancestor is 404
+        if self.ancestor_tile_existence[ancestor_path] is False:
+            return False
+        # probed, ancestor exists or probe-failed
+        # should actually visit the path given.
+        else:
+            return True
 
     async def processBySHA1(self, sess, URL, response, file_name, coord):
         """下载图块并根据摘要来处理文件
@@ -506,6 +578,17 @@ class crawler():
             try:
                 ret_msg = 'none..'
                 async with self.crawlJob_semaphore:
+                    ret_msg = 'probing ancestor\t{}'.format(path)
+                    proceed_visit = await self.probeAncestorExistence(sess, path)
+                    if not proceed_visit:
+                        self.statistics.plus('Skipped')
+                        ret_msg = '404+\t{}'.format(path)
+                        self.logger.debug(ret_msg)
+                        return ret_msg
+                    else:
+                        pass
+                    ret_msg = 'ancestor probed\t{}'.format(path)
+
                     async with sess.head(URL, timeout = 5) as response:
                         r = response
                     #r = requests.head(URL, timeout=5)
@@ -596,6 +679,7 @@ class crawler():
 
     async def visitPaths(self, paths):
         self.crawlJob_semaphore = asyncio.Semaphore(self.max_crawl_workers) 
+        self.ancestor_tile_existence = {} # {'/0/1/1/0': True, '0/1/1/1': False}, shared across corotines.
         async with aiohttp.ClientSession() as sess:
             await asyncio.gather(*[self.visitPath(sess, path) for path in paths])
             
